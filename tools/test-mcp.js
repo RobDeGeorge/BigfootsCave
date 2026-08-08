@@ -247,6 +247,11 @@ async function main() {
   r = await call('set_layer', { name: 'vis', layer: 1, opacity: 5 });
   ok(r.isError && /0 to 1/.test(r.text), 'rejects out-of-range opacity');
 
+  // "false" is truthy; coercing it would reveal a layer the caller meant to hide.
+  r = await call('set_layer', { name: 'vis', layer: 1, visible: 'false' });
+  ok(r.isError && /true or false/.test(r.text), 'rejects a non-boolean visible');
+  ok(onDisk('vis').frames[0].layers[1].visible === false, 'layer stayed hidden after the rejection');
+
   r = await call('set_layer', { name: 'vis', layer: 0, layerName: 'base' });
   ok(!r.isError && onDisk('vis').frames[0].layers[0].name === 'base', 'renames a layer');
 
@@ -270,11 +275,18 @@ async function main() {
   r = await call('merge_layer', { name: 'merge', layer: 0 });
   ok(r.isError && /nothing beneath/.test(r.text), 'refuses to merge layer 0');
 
+  // Merging a hidden layer reveals its pixels irreversibly, so it is refused
+  // rather than warned about — a warning arrives after the art has changed.
   await call('create_sprite', { name: 'merge-hidden', width: 4, height: 4, palette: ['#ff0000', '#00ff00'] });
   await call('add_layer', { name: 'merge-hidden' });
   await call('set_layer', { name: 'merge-hidden', layer: 1, visible: false });
+  const hiddenBefore = onDisk('merge-hidden').frames[0].layers.length;
   r = await call('merge_layer', { name: 'merge-hidden', layer: 1 });
-  ok(!r.isError && /hidden/.test(r.text), 'warns when merging a hidden layer');
+  ok(r.isError && /hidden/.test(r.text), 'refuses to merge a hidden layer');
+  ok(onDisk('merge-hidden').frames[0].layers.length === hiddenBefore, 'refused merge changed nothing');
+  await call('set_layer', { name: 'merge-hidden', layer: 1, visible: true });
+  r = await call('merge_layer', { name: 'merge-hidden', layer: 1 });
+  ok(!r.isError, 'merging succeeds once the layer is made visible');
   invariants('merge', 'after merge_layer');
 
   // multi-frame merge
@@ -341,6 +353,36 @@ async function main() {
   await call('draw_ascii', { name: 'target', key: { a: 0 }, rows: ['aaaa', 'aaaa', 'aaaa', 'aaaa'] });
   ok(fs.readFileSync(path.join(LIB, 'innocent.json'), 'utf8') === innocentBefore,
     'draw_ascii did not clobber the unrelated sprite either');
+
+  // The HTTP routes are the other way a mismatched file gets minted, so check
+  // they store the slugified name rather than whatever the body claimed.
+  const httpPort = 8796;
+  const httpSrv = spawn('node', [path.join(__dirname, '..', 'server.js')], {
+    env: { ...process.env, PORT: String(httpPort), PIXELART_LIBRARY: LIB }, stdio: 'ignore',
+  });
+  await new Promise(res => setTimeout(res, 1200));
+  const body = {
+    format: 'pixelart/1', name: 'Mismatched Name!', w: 4, h: 4, fps: 8,
+    palette: ['#111111'],
+    frames: [{ layers: [{ name: 'L', visible: true, opacity: 1, data: '16.-1' }] }], tags: [],
+  };
+  const post = await fetch('http://localhost:' + httpPort + '/api/sprites', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  }).then(x => x.json()).catch(e => ({ error: e.message }));
+  const stored = await fetch('http://localhost:' + httpPort + '/api/sprites/' + post.name)
+    .then(x => x.json()).catch(() => ({}));
+  ok(post.name === 'mismatched-name', 'POST slugifies the filename');
+  ok(stored.name === 'mismatched-name', 'POST stores the slugified name internally too');
+
+  const put = await fetch('http://localhost:' + httpPort + '/api/sprites/mismatched-name', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...body, name: 'SOMETHING-ELSE' }),
+  }).then(x => x.json()).catch(e => ({ error: e.message }));
+  const afterPut = await fetch('http://localhost:' + httpPort + '/api/sprites/mismatched-name')
+    .then(x => x.json()).catch(() => ({}));
+  ok(!put.error, 'PUT succeeds');
+  ok(afterPut.name === 'mismatched-name', 'PUT ignores a body name that disagrees with the URL');
+  httpSrv.kill();
 
   // ------------------------------------------------------------- rendering
   section('rendering');

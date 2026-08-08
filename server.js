@@ -13,7 +13,9 @@ const { encodePNG } = require('./lib/png');
 const { encodeGIF } = require('./lib/gif');
 
 const ROOT = __dirname;
-const LIBRARY = path.join(ROOT, 'library');
+// Honours the same override as the MCP server, so both can be pointed at a
+// throwaway library. Without it the test suite has to write to the real one.
+const LIBRARY = process.env.PIXELART_LIBRARY || path.join(ROOT, 'library');
 const PORT = Number(process.env.PORT) || 8787;
 
 fs.mkdirSync(LIBRARY, { recursive: true });
@@ -186,6 +188,10 @@ async function handleAPI(req, res, url) {
       if (req.method === 'POST') {
         const sprite = S.validate(JSON.parse(await readBody(req)));
         const file = safeName(sprite.name);
+        // Store the slugified name, not the raw one. Keeping the filename and
+        // the internal name in agreement is what stops a later edit of this
+        // sprite from writing itself over a different one.
+        sprite.name = file;
         fs.writeFileSync(spritePath(file), JSON.stringify(sprite, null, 2));
         return sendJSON(res, 201, { ok: true, name: file });
       }

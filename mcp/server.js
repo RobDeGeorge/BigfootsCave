@@ -858,7 +858,12 @@ const HANDLERS = {
     const changed = [];
 
     if (a.layerName !== undefined) changed.push('name: ' + String(a.layerName));
-    if (a.visible !== undefined) changed.push('visible: ' + (a.visible !== false));
+    if (a.visible !== undefined) {
+      // Insist on a real boolean. Coercing would read the string "false" as
+      // truthy and reveal a layer the caller was trying to hide.
+      if (typeof a.visible !== 'boolean') throw new Error('visible must be true or false, not ' + JSON.stringify(a.visible));
+      changed.push('visible: ' + a.visible);
+    }
     if (a.opacity !== undefined) {
       const o = Number(a.opacity);
       if (!Number.isFinite(o) || o < 0 || o > 1) throw new Error('opacity must be a number from 0 to 1');
@@ -870,7 +875,7 @@ const HANDLERS = {
       const layer = frame.layers[l];
       if (!layer) continue;
       if (a.layerName !== undefined) layer.name = String(a.layerName);
-      if (a.visible !== undefined) layer.visible = a.visible !== false;
+      if (a.visible !== undefined) layer.visible = a.visible;
       if (a.opacity !== undefined) layer.opacity = Number(a.opacity);
     }
     save(sprite);
@@ -882,7 +887,15 @@ const HANDLERS = {
     const l = checkIndex(a.layer, sprite.frames[0].layers.length, 'layer');
     if (l === 0) throw new Error('layer 0 is the bottom layer — there is nothing beneath it to merge into');
 
-    const hidden = sprite.frames[0].layers[l].visible === false;
+    // Merging a hidden layer makes its pixels visible, which changes how the
+    // sprite looks and cannot be undone. Refuse rather than warn afterwards —
+    // by the time a warning is read, the art has already changed.
+    const hiddenIn = sprite.frames.findIndex(f => f.layers[l] && f.layers[l].visible === false);
+    if (hiddenIn >= 0) {
+      throw new Error('layer ' + l + ' is hidden in frame ' + hiddenIn + '. Merging it would make its pixels ' +
+        'visible and there is no undo. Call set_layer with visible: true first if that is what you want, ' +
+        'or delete_layer to discard it.');
+    }
     for (const frame of sprite.frames) {
       if (l >= frame.layers.length) continue;
       const size = sprite.w * sprite.h;
@@ -894,8 +907,7 @@ const HANDLERS = {
     }
     save(sprite);
     return text('Merged layer ' + l + ' into layer ' + (l - 1) + ' of "' + sprite.name + '". ' +
-      sprite.frames[0].layers.length + ' layer(s) left.' +
-      (hidden ? '\n\nHeads up: that layer was hidden, and its pixels are now visible in the merged result.' : ''));
+      sprite.frames[0].layers.length + ' layer(s) left.');
   },
 };
 
