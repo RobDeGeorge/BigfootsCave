@@ -132,20 +132,30 @@ authoring tool takes ASCII, and the preview tool hands back a real PNG the agent
 can look at.
 
 ```
-list_palettes    the built-in palettes and their hex colours
-list_sprites     what's in the library
-get_sprite       read a sprite back as ASCII rows + palette
-create_sprite    new sprite at a given size and palette
-draw_ascii       draw from rows of characters + a character→colour key
-set_pixels       individual pixel touch-ups
-add_frame        append an animation frame
-add_layer        add a layer to every frame
-set_palette      swap the palette; pixel indices stay put, so it recolours
-transform        flip, rotate, shift, outline
-preview_sprite   render to PNG and return the image
-export_sprite    write png / sheet / gif / svg / css / datauri / json to disk
-delete_sprite    remove from the library
+look                                            draw
+  list_palettes  the built-in palettes            create_sprite  new sprite, given size + palette
+  list_sprites   what's in the library            draw_ascii     rows of characters + a char→colour key
+  get_sprite     read back as ASCII + palette     set_pixels     individual pixel touch-ups
+  preview_sprite render to PNG, return the image  transform      flip, rotate, shift, outline
+                                                  set_palette    swap colours, keeping pixel indices
+
+structure                                       manage
+  add_frame      append a frame (or copy one)     set_meta       rename, retag, change fps
+  delete_frame   remove a frame                   export_sprite  png / sheet / gif / svg / css / json
+  add_layer      add a layer to every frame       delete_sprite  remove from the library
+  delete_layer   remove a layer from every frame
+  move_layer     reorder — later draws on top
+  set_layer      rename, hide, set opacity
+  merge_layer    merge a layer into the one below
 ```
+
+`create_sprite` refuses to overwrite an existing name unless you pass
+`overwrite: true`, because there is no undo and a name collision used to destroy
+the art silently.
+
+Run `npm test` to exercise all of it. The suite spawns the real server and talks
+JSON-RPC to it over stdio against a throwaway library, so the schemas, the
+dispatch layer and the error envelope are covered, not just the internals.
 
 A typical exchange looks like:
 

@@ -10,7 +10,8 @@
   "scripts": {
     "start": "node server.js",
     "mcp": "node mcp/server.js",
-    "build:site": "node tools/build-site.js"
+    "build:site": "node tools/build-site.js",
+    "test": "node tools/test-mcp.js"
   },
   "license": "MIT"
 }

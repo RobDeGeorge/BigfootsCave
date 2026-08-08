@@ -195,7 +195,7 @@ const TOOLS = [
   },
   {
     name: 'create_sprite',
-    description: 'Create a new empty sprite in the library. Pick a size that suits the job: 8-16px for icons, 32px for tiles, 64px for portraits, 160x32 for a banner. Overwrites any sprite of the same name.',
+    description: 'Create a new empty sprite in the library. Pick a size that suits the job: 8-16px for icons, 32px for tiles, 64px for portraits, 160x32 for a banner. Fails if the name is taken unless overwrite is true.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -206,6 +206,7 @@ const TOOLS = [
         paletteName: { type: 'string', description: 'Name of a built-in palette, e.g. "dmg", "pico8", "sweetie16". Default "dmg".' },
         fps: { type: 'number', description: 'Playback speed for animations, default 8.' },
         tags: { type: 'array', items: { type: 'string' }, description: 'Free-form tags, e.g. ["ui","button"].' },
+        overwrite: { type: 'boolean', description: 'Replace an existing sprite of the same name. Defaults to false — without it, creating over an existing name fails rather than destroying the art.' },
       },
       required: ['name', 'width', 'height'],
     },
@@ -352,6 +353,88 @@ const TOOLS = [
       required: ['name'],
     },
   },
+  {
+    name: 'set_meta',
+    description: 'Rename a sprite or change its tags and playback speed. Tags drive search and filtering in ' +
+      'the gallery, so tagging work after drawing it is how it becomes findable.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        newName: { type: 'string', description: 'Rename the sprite. Gets slugified like any sprite name.' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Replaces the existing tags entirely.' },
+        fps: { type: 'number', description: 'Playback speed, 1-60.' },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'delete_frame',
+    description: 'Remove one animation frame. A sprite must keep at least one frame.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        frame: { type: 'number', description: 'Frame index to remove.' },
+      },
+      required: ['name', 'frame'],
+    },
+  },
+  {
+    name: 'delete_layer',
+    description: 'Remove a layer from every frame. A sprite must keep at least one layer.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        layer: { type: 'number', description: 'Layer index to remove.' },
+      },
+      required: ['name', 'layer'],
+    },
+  },
+  {
+    name: 'move_layer',
+    description: 'Reorder a layer. Later layers draw on top, so this is how you push shading above or below ' +
+      'the art it shades.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        layer: { type: 'number', description: 'Layer index to move.' },
+        to: { type: 'number', description: 'Index to move it to.' },
+      },
+      required: ['name', 'layer', 'to'],
+    },
+  },
+  {
+    name: 'set_layer',
+    description: 'Rename a layer or change its visibility. A hidden layer keeps its pixels but is left out of ' +
+      'previews and exports.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        layer: { type: 'number' },
+        layerName: { type: 'string' },
+        visible: { type: 'boolean' },
+        opacity: { type: 'number', description: '0 to 1. Rendering treats 0 as hidden.' },
+      },
+      required: ['name', 'layer'],
+    },
+  },
+  {
+    name: 'merge_layer',
+    description: 'Merge a layer into the one below it, in every frame. The upper layer wins where both have ' +
+      'a pixel. Cannot merge layer 0, which has nothing beneath it.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        layer: { type: 'number', description: 'Index of the upper layer, the one that gets merged down.' },
+      },
+      required: ['name', 'layer'],
+    },
+  },
 ];
 
 // ---------------------------------------------------------------- handlers
@@ -409,6 +492,12 @@ const HANDLERS = {
   },
 
   create_sprite(a) {
+    // Silently replacing a sprite is unrecoverable — there is no history and no
+    // undo, so a name collision used to destroy the work with no warning.
+    if (!a.overwrite && fs.existsSync(spritePath(a.name))) {
+      throw new Error('a sprite named "' + safeName(a.name) + '" already exists. ' +
+        'Pick another name, or pass overwrite: true to replace it (this discards the existing art).');
+    }
     const sprite = S.newSprite({
       name: safeName(a.name),
       w: a.width, h: a.height,
@@ -663,6 +752,138 @@ const HANDLERS = {
     if (!fs.existsSync(p)) throw new Error('no sprite named "' + safeName(a.name) + '"');
     fs.unlinkSync(p);
     return text('Deleted "' + safeName(a.name) + '".');
+  },
+
+  set_meta(a) {
+    const sprite = load(a.name);
+    const was = safeName(a.name);
+    const changed = [];
+
+    if (a.tags !== undefined) {
+      if (!Array.isArray(a.tags)) throw new Error('tags must be an array of strings');
+      sprite.tags = a.tags.map(String);
+      changed.push('tags: ' + (sprite.tags.length ? sprite.tags.join(', ') : '(none)'));
+    }
+    if (a.fps !== undefined) {
+      const fps = Math.round(Number(a.fps));
+      if (!Number.isFinite(fps) || fps < 1 || fps > 60) throw new Error('fps must be a number from 1 to 60');
+      sprite.fps = fps;
+      changed.push('fps: ' + fps);
+    }
+
+    let now = was;
+    if (a.newName !== undefined) {
+      now = safeName(a.newName);
+      if (now !== was && fs.existsSync(spritePath(now))) {
+        throw new Error('a sprite named "' + now + '" already exists — delete it first or pick another name');
+      }
+      sprite.name = now;
+      changed.push('name: ' + was + ' -> ' + now);
+    }
+
+    if (!changed.length) throw new Error('nothing to change — pass newName, tags or fps');
+
+    save(sprite);
+    // Write the new file before removing the old one, so a failure midway
+    // leaves a duplicate rather than losing the sprite.
+    if (now !== was) fs.unlinkSync(spritePath(was));
+    return text('Updated "' + now + '".\n  ' + changed.join('\n  '));
+  },
+
+  delete_frame(a) {
+    const sprite = load(a.name);
+    const f = checkIndex(a.frame, sprite.frames.length, 'frame');
+    if (sprite.frames.length === 1) {
+      throw new Error('"' + sprite.name + '" has only one frame — a sprite must keep at least one. ' +
+        'Use delete_sprite to remove it entirely.');
+    }
+    sprite.frames.splice(f, 1);
+    save(sprite);
+    return text('Removed frame ' + f + ' from "' + sprite.name + '". ' +
+      sprite.frames.length + ' frame(s) left.');
+  },
+
+  delete_layer(a) {
+    const sprite = load(a.name);
+    // Layers run parallel across frames (add_layer adds to every frame), so the
+    // index is validated against frame 0 and applied to all of them.
+    const l = checkIndex(a.layer, sprite.frames[0].layers.length, 'layer');
+    if (sprite.frames[0].layers.length === 1) {
+      throw new Error('"' + sprite.name + '" has only one layer — a sprite must keep at least one.');
+    }
+    let removed = 0;
+    for (const frame of sprite.frames) {
+      if (frame.layers.length > 1 && l < frame.layers.length) {
+        frame.layers.splice(l, 1);
+        removed++;
+      }
+    }
+    save(sprite);
+    return text('Removed layer ' + l + ' from ' + removed + ' frame(s) of "' + sprite.name + '". ' +
+      sprite.frames[0].layers.length + ' layer(s) left.');
+  },
+
+  move_layer(a) {
+    const sprite = load(a.name);
+    const count = sprite.frames[0].layers.length;
+    const from = checkIndex(a.layer, count, 'layer');
+    const to = checkIndex(a.to, count, 'target index');
+    if (from === to) return text('Layer ' + from + ' is already at that index.');
+    for (const frame of sprite.frames) {
+      if (from < frame.layers.length) {
+        const [moved] = frame.layers.splice(from, 1);
+        frame.layers.splice(Math.min(to, frame.layers.length), 0, moved);
+      }
+    }
+    save(sprite);
+    return text('Moved layer ' + from + ' to ' + to + ' in "' + sprite.name + '". ' +
+      'Order is bottom to top: ' + sprite.frames[0].layers.map(l => l.name).join(', '));
+  },
+
+  set_layer(a) {
+    const sprite = load(a.name);
+    const l = checkIndex(a.layer, sprite.frames[0].layers.length, 'layer');
+    const changed = [];
+
+    if (a.layerName !== undefined) changed.push('name: ' + String(a.layerName));
+    if (a.visible !== undefined) changed.push('visible: ' + (a.visible !== false));
+    if (a.opacity !== undefined) {
+      const o = Number(a.opacity);
+      if (!Number.isFinite(o) || o < 0 || o > 1) throw new Error('opacity must be a number from 0 to 1');
+      changed.push('opacity: ' + o);
+    }
+    if (!changed.length) throw new Error('nothing to change — pass layerName, visible or opacity');
+
+    for (const frame of sprite.frames) {
+      const layer = frame.layers[l];
+      if (!layer) continue;
+      if (a.layerName !== undefined) layer.name = String(a.layerName);
+      if (a.visible !== undefined) layer.visible = a.visible !== false;
+      if (a.opacity !== undefined) layer.opacity = Number(a.opacity);
+    }
+    save(sprite);
+    return text('Updated layer ' + l + ' of "' + sprite.name + '".\n  ' + changed.join('\n  '));
+  },
+
+  merge_layer(a) {
+    const sprite = load(a.name);
+    const l = checkIndex(a.layer, sprite.frames[0].layers.length, 'layer');
+    if (l === 0) throw new Error('layer 0 is the bottom layer — there is nothing beneath it to merge into');
+
+    const hidden = sprite.frames[0].layers[l].visible === false;
+    for (const frame of sprite.frames) {
+      if (l >= frame.layers.length) continue;
+      const size = sprite.w * sprite.h;
+      const top = S.decodeRLE(frame.layers[l].data, size);
+      const under = S.decodeRLE(frame.layers[l - 1].data, size);
+      for (let i = 0; i < size; i++) if (top[i] >= 0) under[i] = top[i];
+      frame.layers[l - 1].data = S.encodeRLE(Array.from(under));
+      frame.layers.splice(l, 1);
+    }
+    save(sprite);
+    return text('Merged layer ' + l + ' into layer ' + (l - 1) + ' of "' + sprite.name + '". ' +
+      sprite.frames[0].layers.length + ' layer(s) left.' +
+      (hidden ? '\n\nHeads up: that layer was hidden, and its pixels are now visible in the merged result.' : ''));
   },
 };
 
