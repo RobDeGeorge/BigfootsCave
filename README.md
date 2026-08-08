@@ -202,6 +202,13 @@ deploys it to GitHub Pages on every push to `main`, which means adding art to
 
 `site/` is not committed — it is regenerated on every deploy.
 
+Analytics are off unless `PIXELART_ANALYTICS_TOKEN` is set to a Cloudflare Web
+Analytics site token; with no token the build emits an HTML comment and nothing
+else. It is cookieless and sets no cross-site identifiers, so it needs no
+consent banner. In CI the value comes from the `CF_ANALYTICS_TOKEN` repository
+variable — a variable rather than a secret, since the token is served in the
+page regardless.
+
 ---
 
 ## The sprite format

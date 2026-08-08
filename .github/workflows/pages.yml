@@ -28,8 +28,12 @@ jobs:
 
       # No dependencies to install — the encoders are hand-written and the
       # generator is plain Node. This is the whole build.
+      # PIXELART_ANALYTICS_TOKEN is a repo *variable*, not a secret — the token
+      # is served in the page anyway. Unset simply emits no analytics.
       - name: Build site
         run: node tools/build-site.js
+        env:
+          PIXELART_ANALYTICS_TOKEN: ${{ vars.CF_ANALYTICS_TOKEN }}
 
       - uses: actions/configure-pages@v5
 

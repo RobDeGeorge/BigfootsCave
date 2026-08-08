@@ -25,6 +25,28 @@ const TEMPLATE = path.join(__dirname, 'gallery.template.html');
 const DOMAIN = 'bigfootscave.com';
 const REPO = 'https://github.com/RobDeGeorge/BigfootsCave';
 
+/**
+ * Cloudflare Web Analytics site token, or empty to emit nothing at all.
+ *
+ * Cookieless and with no cross-site identifiers, so it needs no consent
+ * banner. The token is public by design — it ships in the page — but it is
+ * still validated before being interpolated, since it arrives from the
+ * environment and lands inside an HTML attribute.
+ */
+const ANALYTICS_TOKEN = (process.env.PIXELART_ANALYTICS_TOKEN || '').trim();
+
+function analyticsTag() {
+  if (!ANALYTICS_TOKEN) {
+    return '<!-- analytics: set PIXELART_ANALYTICS_TOKEN to enable -->';
+  }
+  if (!/^[A-Za-z0-9]{16,64}$/.test(ANALYTICS_TOKEN)) {
+    console.error('  PIXELART_ANALYTICS_TOKEN does not look like a site token — refusing to embed it');
+    process.exit(1);
+  }
+  return '<script defer src="https://static.cloudflareinsights.com/beacon.min.js" ' +
+    'data-cf-beacon=\'{"token":"' + ANALYTICS_TOKEN + '"}\'></script>';
+}
+
 /** Thumbnails aim for roughly this many pixels on the long edge. */
 const THUMB_TARGET = 256;
 /** Scale for the "download the PNG" asset. */
@@ -236,7 +258,8 @@ function build() {
     .replace(/__REPO__/g, REPO)
     .replace(/__LOGO__/g, logo)
     .replace(/__FAVICON__/g, favicon)
-    .replace(/__OGIMAGE__/g, ogImage);
+    .replace(/__OGIMAGE__/g, ogImage)
+    .replace(/__ANALYTICS__/g, () => analyticsTag());
 
   write('index.html', html);
   write('CNAME', DOMAIN + '\n');     // GitHub Pages custom domain

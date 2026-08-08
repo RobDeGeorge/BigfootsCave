@@ -17,6 +17,7 @@
 <meta name="twitter:image" content="https://bigfootscave.com/__OGIMAGE__">
 <link rel="canonical" href="https://bigfootscave.com/">
 <link rel="icon" href="__FAVICON__">
+__ANALYTICS__
 <style>
   :root {
     --bg:      #12100e;
@@ -178,6 +179,48 @@
   }
   footer a { color: var(--muted); }
   footer a:hover { color: var(--amber); }
+
+  /* The tag toggle only exists on narrow screens; on desktop the pills are
+     always visible and the button would be noise. */
+  #tagToggle { display: none; }
+
+  /* ------------------------------------------------------------- mobile
+     At 390px the header ran to 410px and the tag pills to six rows, so a
+     visitor scrolled roughly 660px of chrome before reaching a single sprite.
+     Most links are opened on a phone, so that was the common first
+     impression. Tighten the header and put the tags behind a toggle. */
+  @media (max-width: 640px) {
+    header { padding: 20px 0 16px; }
+    .brand { gap: 12px; }
+    .brand img { width: 40px; height: 40px; }
+    h1 { font-size: 21px; letter-spacing: 0.1em; }
+    .tagline { font-size: 12px; }
+    .pitch { margin-top: 14px; font-size: 13px; }
+    .cta { margin-top: 14px; }
+    .cta a { padding: 9px 13px; }
+
+    .toolbar { padding: 10px 0; }
+    .toolbar .row { gap: 8px; }
+    input[type=search] { flex: 1 1 100%; min-width: 0; }
+    select { flex: 1 1 auto; }
+    /* The size slider is a desktop refinement; on a phone the column count is
+       fixed by width anyway, so it only costs room. */
+    .toolbar .lbl, #zoom { display: none; }
+
+    #tagToggle {
+      display: inline-block; padding: 7px 11px; font: inherit; font-size: 12px;
+      background: var(--panel-2); color: var(--text);
+      border: 1px solid var(--line); cursor: pointer;
+    }
+    #tagToggle[aria-expanded=true] { border-color: var(--amber); color: var(--amber); }
+    #tagToggle .n { color: var(--amber); }
+
+    .tags { display: none; max-height: 40vh; overflow-y: auto; }
+    .tags.open { display: flex; }
+
+    .grid { gap: 10px; }
+    footer { padding: 18px 0 30px; }
+  }
 </style>
 </head>
 <body>
@@ -223,6 +266,7 @@
         <button class="swatch sw-m" data-bg="#808080"    title="mid grey"    aria-pressed="false"></button>
         <button class="swatch sw-l" data-bg="#f4f0e8"    title="light"       aria-pressed="false"></button>
       </div>
+      <button id="tagToggle" aria-expanded="false" aria-controls="tags">tags</button>
     </div>
     <div class="tags" id="tags"></div>
   </div>
@@ -236,8 +280,7 @@
 <footer>
   <div class="wrap">
     <span id="built"></span> ·
-    <a href="__REPO__">source on GitHub</a> ·
-    art is MIT-licensed, use it in anything
+    <a href="__REPO__">source on GitHub</a>
   </div>
 </footer>
 
@@ -328,8 +371,21 @@ $('tags').addEventListener('click', e => {
   const t = b.dataset.tag;
   activeTags.has(t) ? activeTags.delete(t) : activeTags.add(t);
   b.setAttribute('aria-pressed', activeTags.has(t));
+  updateTagToggle();
   render();
 });
+
+// The pills collapse on narrow screens, so the button has to report how many
+// filters are on — otherwise a hidden filter looks like a broken gallery.
+function updateTagToggle() {
+  const btn = $('tagToggle');
+  btn.innerHTML = activeTags.size ? 'tags <span class="n">' + activeTags.size + '</span>' : 'tags';
+}
+$('tagToggle').addEventListener('click', () => {
+  const open = $('tags').classList.toggle('open');
+  $('tagToggle').setAttribute('aria-expanded', open);
+});
+updateTagToggle();
 $('bg').addEventListener('click', e => {
   const b = e.target.closest('.swatch');
   if (!b) return;
