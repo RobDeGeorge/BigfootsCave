@@ -109,15 +109,45 @@ function spriteToGIF(sprite, scale) {
 
 // ------------------------------------------------------------------ routing
 
+/**
+ * Reads are open so exports can be embedded from other local projects
+ * (`<img src="http://localhost:8787/api/export/x.png">`). Writes are not:
+ * a wildcard on mutating methods lets any page the user happens to be
+ * visiting preflight and then POST/PUT/DELETE into the library, and this
+ * server has no authentication to fall back on. Images don't consult CORS
+ * at all, so keeping the wildcard on GET costs nothing.
+ */
 function send(res, code, body, type) {
   res.writeHead(code, {
     'Content-Type': type || 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET,PUT,POST,DELETE,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Methods': 'GET,OPTIONS',
     'Cache-Control': 'no-store',
   });
   res.end(body);
+}
+
+const LOCAL_HOST = /^(localhost|127\.0\.0\.1|\[::1\]|::1)(:\d+)?$/i;
+
+/**
+ * Guards mutating requests against a web page the user is visiting and against
+ * DNS rebinding.
+ *
+ * A cross-origin `fetch` always sends `Origin`, so rejecting a non-local one
+ * closes the browser path. Rebinding gets the attacker a local-looking Origin
+ * but not a local `Host`, so both are checked. Direct clients (curl, the MCP
+ * server) send no Origin and are unaffected.
+ */
+function localRequestOnly(req) {
+  const host = req.headers.host || '';
+  if (!LOCAL_HOST.test(host)) return 'refusing request for host "' + host + '" — bind is localhost only';
+  const origin = req.headers.origin;
+  if (origin) {
+    let h;
+    try { h = new URL(origin).host; } catch (e) { return 'bad Origin header'; }
+    if (!LOCAL_HOST.test(h)) return 'cross-origin writes are not allowed (Origin: ' + origin + ')';
+  }
+  return null;
 }
 
 function sendJSON(res, code, obj) {
@@ -141,6 +171,11 @@ function readBody(req) {
 async function handleAPI(req, res, url) {
   const parts = url.pathname.split('/').filter(Boolean); // ["api", ...]
   const q = url.searchParams;
+
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    const refusal = localRequestOnly(req);
+    if (refusal) return sendJSON(res, 403, { error: refusal });
+  }
 
   if (parts[1] === 'palettes') return sendJSON(res, 200, S.PALETTES);
 

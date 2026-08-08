@@ -32,6 +32,30 @@ function safeName(name) {
 
 const spritePath = name => path.join(LIBRARY, safeName(name) + '.json');
 
+/**
+ * Confine an export destination to the exports directory.
+ *
+ * Everything reaching this function is model-controlled: `outPath` comes
+ * straight off the tool call, and the default filename is built from the
+ * sprite's internal `name` field, which `validate()` passes through untouched
+ * (a sprite saved as `foo.json` can carry any name it likes inside). Without a
+ * check, an agent that has been talked into calling export_sprite is an
+ * arbitrary file write — ~/.bashrc, ~/.ssh/authorized_keys, a crontab — and
+ * several export formats embed attacker-influenced text in their contents.
+ *
+ * Resolve first, then compare, so `..` segments and symlinked parents are
+ * already collapsed by the time the prefix test runs.
+ */
+function safeExportPath(outPath, fallbackName) {
+  fs.mkdirSync(EXPORTS, { recursive: true });
+  const root = fs.realpathSync(EXPORTS);
+  const target = path.resolve(outPath ? String(outPath) : path.join(root, fallbackName));
+  if (target !== root && !target.startsWith(root + path.sep)) {
+    throw new Error('outPath must stay inside the exports directory (' + root + ')');
+  }
+  return target;
+}
+
 function load(name) {
   const p = spritePath(name);
   if (!fs.existsSync(p)) throw new Error('no sprite named "' + safeName(name) + '". Use list_sprites to see what exists.');
@@ -625,11 +649,10 @@ const HANDLERS = {
         '" style="image-rendering:pixelated" alt="' + sprite.name + '">';
     }
 
-    let out = a.outPath;
-    if (!out) {
-      fs.mkdirSync(EXPORTS, { recursive: true });
-      out = path.join(EXPORTS, sprite.name + (a.format === 'sheet' ? '-sheet' : '') + '.' + ext);
-    }
+    // safeName() the sprite's own name — it is not a filename until here.
+    const out = safeExportPath(
+      a.outPath,
+      safeName(sprite.name) + (a.format === 'sheet' ? '-sheet' : '') + '.' + ext);
     fs.mkdirSync(path.dirname(out), { recursive: true });
     fs.writeFileSync(out, body);
     return text('Wrote ' + out + ' (' + (Buffer.isBuffer(body) ? body.length : Buffer.byteLength(body)) + ' bytes).');

@@ -1680,8 +1680,19 @@ async function loadGallery() {
   const tags = [...new Set(galItems.flatMap(i => i.tags || []))].sort();
   const sel = document.getElementById('galTag');
   const keep = sel.value;
-  sel.innerHTML = '<option value="">all tags</option>' +
-    tags.map(t => '<option>' + t + '</option>').join('');
+  // Tags come from the library, and the MCP server lets an agent write anything
+  // into them — so they are untrusted. Build the options as DOM nodes and set
+  // textContent, which never parses markup, rather than concatenating innerHTML.
+  sel.replaceChildren();
+  const optAll = document.createElement('option');
+  optAll.value = '';
+  optAll.textContent = 'all tags';
+  sel.append(optAll);
+  for (const t of tags) {
+    const o = document.createElement('option');
+    o.textContent = t;
+    sel.append(o);
+  }
   sel.value = tags.includes(keep) ? keep : '';
   renderGallery();
 }
