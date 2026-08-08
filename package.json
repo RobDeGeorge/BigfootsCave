@@ -1,0 +1,16 @@
+{
+  "name": "pixelart-engine",
+  "version": "1.0.0",
+  "description": "A pixel art engine: browser editor + sprite library + MCP server for AI agents",
+  "type": "commonjs",
+  "main": "server.js",
+  "bin": {
+    "pixelart-mcp": "mcp/server.js"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "mcp": "node mcp/server.js",
+    "build:site": "node tools/build-site.js"
+  },
+  "license": "MIT"
+}

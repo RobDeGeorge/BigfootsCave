@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bigfoot's Cave — a pixel art library</title>
+<meta name="description" content="A free pixel art editor with an MCP server, so you and your AI agents draw into the same library. __COUNT__ sprites and counting.">
+<meta property="og:title" content="Bigfoot's Cave">
+<meta property="og:description" content="A free pixel art editor with an MCP server, so you and your AI agents draw into the same library.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://bigfootscave.com/">
+<meta property="og:image" content="https://bigfootscave.com/__OGIMAGE__">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="__FAVICON__">
+<style>
+  :root {
+    --bg:      #12100e;
+    --panel:   #1a1613;
+    --panel-2: #221d19;
+    --line:    #302822;
+    --text:    #e8ddd0;
+    --muted:   #8b7d6d;
+    --amber:   #f2b134;
+    --moss:    #63c74d;
+    --shadow:  0 2px 0 #0a0908;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.55 ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  img, canvas { image-rendering: pixelated; image-rendering: crisp-edges; }
+  a { color: var(--amber); }
+
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 20px; }
+
+  /* ---------------------------------------------------------------- header */
+  header {
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #171310 0%, var(--bg) 100%);
+    padding: 34px 0 26px;
+  }
+  .brand { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .brand img { width: 56px; height: 56px; flex: none; }
+  h1 {
+    margin: 0;
+    font-size: 30px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--amber);
+    text-shadow: var(--shadow);
+  }
+  .tagline { margin: 3px 0 0; color: var(--muted); font-size: 13.5px; }
+  .pitch { margin: 20px 0 0; max-width: 62ch; color: var(--text); font-size: 14px; }
+  .pitch strong { color: var(--moss); font-weight: normal; }
+  .cta { margin: 18px 0 0; display: flex; gap: 10px; flex-wrap: wrap; }
+  .cta a {
+    display: inline-block; padding: 8px 14px; text-decoration: none;
+    border: 1px solid var(--line); background: var(--panel-2);
+    color: var(--text); font-size: 13px; box-shadow: var(--shadow);
+  }
+  .cta a:hover { border-color: var(--amber); color: var(--amber); }
+  .cta a.primary { background: var(--amber); color: #1a1206; border-color: var(--amber); font-weight: bold; }
+  .cta a.primary:hover { background: #ffc95a; color: #1a1206; }
+
+  /* --------------------------------------------------------------- toolbar */
+  .toolbar {
+    position: sticky; top: 0; z-index: 20;
+    background: rgba(18,16,14,0.94);
+    backdrop-filter: blur(6px);
+    border-bottom: 1px solid var(--line);
+    padding: 12px 0;
+  }
+  .toolbar .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  input[type=search], select {
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); padding: 7px 10px;
+    font: inherit; font-size: 13px;
+  }
+  input[type=search] { min-width: 190px; flex: 1 1 190px; }
+  input[type=search]:focus, select:focus { outline: none; border-color: var(--amber); }
+  input[type=range] { accent-color: var(--amber); width: 96px; }
+  .lbl { color: var(--muted); font-size: 12px; }
+
+  .swatches { display: flex; gap: 5px; }
+  .swatch {
+    width: 24px; height: 24px; border: 1px solid var(--line); cursor: pointer; padding: 0;
+  }
+  .swatch[aria-pressed=true] { border-color: var(--amber); box-shadow: 0 0 0 1px var(--amber); }
+  .sw-t { background-image:
+      linear-gradient(45deg, #3a3a3a 25%, transparent 25%, transparent 75%, #3a3a3a 75%),
+      linear-gradient(45deg, #3a3a3a 25%, #262626 25%, #262626 75%, #3a3a3a 75%);
+    background-size: 10px 10px; background-position: 0 0, 5px 5px; }
+  .sw-d { background: #14120f; }
+  .sw-m { background: #808080; }
+  .sw-l { background: #f4f0e8; }
+
+  .tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  .tag {
+    font-size: 12px; padding: 3px 9px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--panel);
+    color: var(--muted);
+  }
+  .tag:hover { color: var(--text); }
+  .tag[aria-pressed=true] { background: var(--amber); color: #1a1206; border-color: var(--amber); }
+
+  /* ------------------------------------------------------------------ grid */
+  .count { color: var(--muted); font-size: 12px; margin: 18px 0 10px; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(var(--cell, 160px), 1fr));
+    gap: 14px;
+    padding-bottom: 60px;
+  }
+  .card {
+    border: 1px solid var(--line); background: var(--panel);
+    display: flex; flex-direction: column; cursor: pointer;
+    transition: border-color .12s, transform .12s;
+  }
+  .card:hover { border-color: var(--amber); transform: translateY(-2px); }
+  .thumb {
+    display: flex; align-items: center; justify-content: center;
+    aspect-ratio: 1; padding: 12px; overflow: hidden;
+  }
+  /* Fill the cell rather than sitting at the asset's intrinsic size — a 16×16
+     sprite at its natural size is a speck. object-fit keeps the aspect ratio. */
+  .thumb img { width: 100%; height: 100%; object-fit: contain; }
+  .meta { border-top: 1px solid var(--line); padding: 7px 9px; background: var(--panel-2); }
+  .meta .nm {
+    font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .meta .dim { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .meta .dim .anim { color: var(--moss); }
+  .empty { color: var(--muted); padding: 40px 0; text-align: center; }
+
+  /* -------------------------------------------------------------- lightbox */
+  dialog {
+    border: 1px solid var(--line); background: var(--panel);
+    color: var(--text); padding: 0; max-width: 620px; width: calc(100% - 32px);
+    box-shadow: 0 20px 60px rgba(0,0,0,.7);
+  }
+  dialog::backdrop { background: rgba(8,7,6,.82); }
+  .dlg-img { display: flex; align-items: center; justify-content: center; padding: 28px; min-height: 260px; }
+  .dlg-img img { max-width: 100%; max-height: 380px; }
+  .dlg-body { border-top: 1px solid var(--line); padding: 16px 18px 18px; }
+  .dlg-body h2 { margin: 0 0 3px; font-size: 17px; color: var(--amber); }
+  .dlg-body .sub { color: var(--muted); font-size: 12px; }
+  .pal { display: flex; flex-wrap: wrap; gap: 4px; margin: 14px 0; }
+  .pal i { width: 20px; height: 20px; border: 1px solid rgba(255,255,255,.14); display: block; }
+  .dl { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+  .dl a {
+    font-size: 12px; padding: 6px 11px; text-decoration: none;
+    border: 1px solid var(--line); background: var(--panel-2); color: var(--text);
+  }
+  .dl a:hover { border-color: var(--amber); color: var(--amber); }
+  .x {
+    position: absolute; top: 8px; right: 10px; background: none; border: none;
+    color: var(--muted); font-size: 22px; cursor: pointer; line-height: 1;
+  }
+  .x:hover { color: var(--text); }
+
+  footer {
+    border-top: 1px solid var(--line); padding: 24px 0 40px;
+    color: var(--muted); font-size: 12px;
+  }
+  footer a { color: var(--muted); }
+  footer a:hover { color: var(--amber); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <div class="brand">
+      <img src="__LOGO__" alt="">
+      <div>
+        <h1>Bigfoot's Cave</h1>
+        <p class="tagline">A pixel art library, and the tool that made it.</p>
+      </div>
+    </div>
+    <p class="pitch">
+      A free, dependency-free pixel art editor that runs in your browser — layers, frames,
+      onion skinning, palette swapping, GIF and spritesheet export. It ships with an
+      <strong>MCP server</strong>, so your AI agents draw into the very same library you do.
+      Every sprite below was made with it.
+    </p>
+    <div class="cta">
+      <a class="primary" href="__REPO__">Get the tool — free</a>
+      <a href="__REPO__#mcp--letting-agents-draw">Set up MCP</a>
+    </div>
+  </div>
+</header>
+
+<div class="toolbar">
+  <div class="wrap">
+    <div class="row">
+      <input type="search" id="q" placeholder="search name or tag…" autocomplete="off">
+      <select id="sort">
+        <option value="featured">featured</option>
+        <option value="new">newest</option>
+        <option value="name">name</option>
+        <option value="size">size</option>
+        <option value="frames">frames</option>
+      </select>
+      <span class="lbl">size</span>
+      <input type="range" id="zoom" min="110" max="300" step="10" value="160">
+      <div class="swatches" id="bg">
+        <button class="swatch sw-t" data-bg="transparent" title="transparent" aria-pressed="true"></button>
+        <button class="swatch sw-d" data-bg="#14120f"    title="dark"        aria-pressed="false"></button>
+        <button class="swatch sw-m" data-bg="#808080"    title="mid grey"    aria-pressed="false"></button>
+        <button class="swatch sw-l" data-bg="#f4f0e8"    title="light"       aria-pressed="false"></button>
+      </div>
+    </div>
+    <div class="tags" id="tags"></div>
+  </div>
+</div>
+
+<div class="wrap">
+  <p class="count" id="count"></p>
+  <div class="grid" id="grid"></div>
+</div>
+
+<footer>
+  <div class="wrap">
+    <span id="built"></span> ·
+    <a href="__REPO__">source on GitHub</a> ·
+    art is MIT-licensed, use it in anything
+  </div>
+</footer>
+
+<dialog id="dlg">
+  <button class="x" id="dlgx" aria-label="close">&times;</button>
+  <div class="dlg-img" id="dlgimg"></div>
+  <div class="dlg-body">
+    <h2 id="dlgname"></h2>
+    <div class="sub" id="dlgsub"></div>
+    <div class="pal" id="dlgpal"></div>
+    <div class="dl" id="dlgdl"></div>
+  </div>
+</dialog>
+
+<script>
+const SPRITES = __SPRITES__;
+const BUILT   = "__BUILT__";
+
+const $ = id => document.getElementById(id);
+const grid = $('grid');
+let activeTags = new Set();
+let backdrop = 'transparent';
+
+// Tag pills, most common first — a long alphabetical list buries the useful ones.
+const tagCount = {};
+for (const s of SPRITES) for (const t of s.tags) tagCount[t] = (tagCount[t] || 0) + 1;
+const allTags = Object.keys(tagCount).sort((a, b) => tagCount[b] - tagCount[a] || a.localeCompare(b));
+$('tags').innerHTML = allTags.map(t =>
+  `<button class="tag" data-tag="${esc(t)}" aria-pressed="false">${esc(t)} <span style="opacity:.55">${tagCount[t]}</span></button>`
+).join('');
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+function visible() {
+  const q = $('q').value.trim().toLowerCase();
+  let out = SPRITES.filter(s => {
+    if (activeTags.size && !s.tags.some(t => activeTags.has(t))) return false;
+    if (!q) return true;
+    return s.name.includes(q) || s.title.toLowerCase().includes(q) || s.tags.some(t => t.includes(q));
+  });
+  const sort = $('sort').value;
+  out.sort((a, b) =>
+    sort === 'name'   ? a.name.localeCompare(b.name)
+  : sort === 'size'   ? (b.w * b.h) - (a.w * a.h) || a.name.localeCompare(b.name)
+  : sort === 'frames' ? b.frames - a.frames || a.name.localeCompare(b.name)
+  : sort === 'new'    ? b.updated.localeCompare(a.updated)
+  :                     a.rank - b.rank || a.name.localeCompare(b.name));
+  return out;
+}
+
+function render() {
+  const list = visible();
+  $('count').textContent = list.length + ' of ' + SPRITES.length + ' sprites';
+  grid.innerHTML = list.map((s, i) => `
+    <div class="card" data-i="${SPRITES.indexOf(s)}">
+      <div class="thumb" style="background:${backdrop === 'transparent' ? '' : backdrop}"
+           ${backdrop === 'transparent' ? 'data-checker="1"' : ''}>
+        <img src="${esc(s.img)}" alt="${esc(s.title)}" loading="${i < 24 ? 'eager' : 'lazy'}"
+             width="${s.iw}" height="${s.ih}">
+      </div>
+      <div class="meta">
+        <div class="nm">${esc(s.title)}</div>
+        <div class="dim">${s.w}×${s.h}${s.frames > 1 ? ` · <span class="anim">${s.frames}f</span>` : ''}</div>
+      </div>
+    </div>`).join('');
+  for (const el of grid.querySelectorAll('[data-checker]')) {
+    el.style.backgroundImage =
+      'linear-gradient(45deg,#242020 25%,transparent 25%,transparent 75%,#242020 75%),' +
+      'linear-gradient(45deg,#242020 25%,#1a1613 25%,#1a1613 75%,#242020 75%)';
+    el.style.backgroundSize = '12px 12px';
+    el.style.backgroundPosition = '0 0, 6px 6px';
+  }
+  if (!list.length) grid.innerHTML = '<p class="empty">Nothing matches. Bigfoot is elusive.</p>';
+}
+
+// ------------------------------------------------------------------ events
+
+$('q').addEventListener('input', render);
+$('sort').addEventListener('change', render);
+$('zoom').addEventListener('input', e => {
+  document.documentElement.style.setProperty('--cell', e.target.value + 'px');
+});
+$('tags').addEventListener('click', e => {
+  const b = e.target.closest('.tag');
+  if (!b) return;
+  const t = b.dataset.tag;
+  activeTags.has(t) ? activeTags.delete(t) : activeTags.add(t);
+  b.setAttribute('aria-pressed', activeTags.has(t));
+  render();
+});
+$('bg').addEventListener('click', e => {
+  const b = e.target.closest('.swatch');
+  if (!b) return;
+  backdrop = b.dataset.bg;
+  for (const s of $('bg').children) s.setAttribute('aria-pressed', s === b);
+  render();
+});
+
+const dlg = $('dlg');
+grid.addEventListener('click', e => {
+  const card = e.target.closest('.card');
+  if (!card) return;
+  open(SPRITES[+card.dataset.i]);
+});
+$('dlgx').addEventListener('click', () => dlg.close());
+dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); });
+
+function open(s) {
+  $('dlgimg').style.background = backdrop === 'transparent' ? 'var(--panel-2)' : backdrop;
+  $('dlgimg').innerHTML = `<img src="${esc(s.img)}" alt="${esc(s.title)}"
+      style="width:${Math.min(380, s.w * s.big)}px">`;
+  $('dlgname').textContent = s.title;
+  $('dlgsub').textContent =
+    `${s.w}×${s.h} · ${s.frames} frame${s.frames > 1 ? 's' : ''}` +
+    (s.frames > 1 ? ` at ${s.fps}fps` : '') +
+    ` · ${s.palette.length} colours` +
+    (s.tags.length ? ` · ${s.tags.join(', ')}` : '');
+  $('dlgpal').innerHTML = s.palette.map(c => `<i style="background:${esc(c)}" title="${esc(c)}"></i>`).join('');
+  $('dlgdl').innerHTML =
+    `<a href="${esc(s.png)}" download>PNG</a>` +
+    (s.gif ? `<a href="${esc(s.gif)}" download>GIF</a>` : '') +
+    (s.sheet ? `<a href="${esc(s.sheet)}" download>spritesheet</a>` : '') +
+    `<a href="${esc(s.json)}" download>.json source</a>`;
+  dlg.showModal();
+}
+
+$('built').textContent = SPRITES.length + ' sprites · built ' + BUILT;
+document.documentElement.style.setProperty('--cell', '160px');
+render();
+</script>
+</body>
+</html>
