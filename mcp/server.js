@@ -56,10 +56,22 @@ function safeExportPath(outPath, fallbackName) {
   return target;
 }
 
+/**
+ * The filename is the sprite's identity, not the `name` field inside it.
+ *
+ * save() derives its destination from `sprite.name`, so if a file on disk
+ * carries a name that disagrees with its filename — which the HTTP PUT route
+ * and hand-edited files can both produce — then every mutation writes to a
+ * *different* sprite than the one it loaded. Editing A silently overwrites B,
+ * and A never changes. There is no undo here, so that is unrecoverable data
+ * loss. Normalising on load makes the whole class of bug impossible.
+ */
 function load(name) {
   const p = spritePath(name);
   if (!fs.existsSync(p)) throw new Error('no sprite named "' + safeName(name) + '". Use list_sprites to see what exists.');
-  return S.validate(JSON.parse(fs.readFileSync(p, 'utf8')));
+  const sprite = S.validate(JSON.parse(fs.readFileSync(p, 'utf8')));
+  sprite.name = safeName(name);
+  return sprite;
 }
 
 function save(sprite) {

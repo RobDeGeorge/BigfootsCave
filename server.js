@@ -193,6 +193,10 @@ async function handleAPI(req, res, url) {
       if (req.method === 'GET') return sendJSON(res, 200, readSprite(name));
       if (req.method === 'PUT') {
         const sprite = S.validate(JSON.parse(await readBody(req)));
+        // The URL is the sprite's identity. Letting the body disagree writes a
+        // file whose internal name points at a different sprite, and the next
+        // edit of this one would then overwrite that one instead.
+        sprite.name = safeName(name);
         fs.writeFileSync(spritePath(name), JSON.stringify(sprite, null, 2));
         return sendJSON(res, 200, { ok: true, name: safeName(name) });
       }

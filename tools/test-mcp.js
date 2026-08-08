@@ -304,10 +304,43 @@ async function main() {
   ok(!r.isError, 'export still succeeds with a hostile internal name');
   ok(!fs.existsSync(path.join(TMP, 'ESCAPED.png')) && !fs.existsSync('/ESCAPED.png'),
     'hostile internal name did not escape exports/');
-  ok(fs.readdirSync(EXP).some(f => /escaped/i.test(f)), 'it was slugified into exports/ instead');
+  // load() now normalises the internal name to the filename, so the forged name
+  // is gone before it can reach a path at all. safeExportPath still confines the
+  // result — two independent barriers, either of which would be sufficient.
+  ok(fs.existsSync(path.join(EXP, 'sec.png')),
+    'export used the filename identity, not the forged internal name');
+  ok(!fs.readdirSync(EXP).some(f => /escaped/i.test(f)),
+    'the forged name did not survive into a filename at all');
 
   r = await call('export_sprite', { name: 'sec', format: 'png', outPath: path.join(EXP, 'fine.png') });
   ok(!r.isError && fs.existsSync(path.join(EXP, 'fine.png')), 'a legitimate outPath inside exports/ still works');
+
+  // ------------------------------------- filename is the sprite's identity
+  // A file whose internal `name` disagrees with its filename used to make every
+  // mutation write to whatever sprite that name pointed at — clobbering an
+  // innocent bystander while the intended edit silently went nowhere.
+  section('filename/internal-name mismatch');
+  await call('create_sprite', { name: 'target', width: 4, height: 4, palette: ['#111111'] });
+  await call('create_sprite', { name: 'innocent', width: 8, height: 8, palette: ['#222222'] });
+  const innocentBefore = fs.readFileSync(path.join(LIB, 'innocent.json'), 'utf8');
+
+  const forged = onDisk('target');
+  forged.name = 'innocent';
+  fs.writeFileSync(path.join(LIB, 'target.json'), JSON.stringify(forged));
+
+  r = await call('set_meta', { name: 'target', tags: ['landed'] });
+  ok(!r.isError, 'set_meta succeeds on a mismatched file');
+  ok(fs.readFileSync(path.join(LIB, 'innocent.json'), 'utf8') === innocentBefore,
+    'set_meta did not clobber the unrelated sprite');
+  ok(onDisk('target').tags.join(',') === 'landed', 'the change landed on the intended sprite');
+  ok(onDisk('target').name === 'target', 'internal name is normalised to the filename');
+
+  const forged2 = onDisk('target');
+  forged2.name = 'innocent';
+  fs.writeFileSync(path.join(LIB, 'target.json'), JSON.stringify(forged2));
+  await call('draw_ascii', { name: 'target', key: { a: 0 }, rows: ['aaaa', 'aaaa', 'aaaa', 'aaaa'] });
+  ok(fs.readFileSync(path.join(LIB, 'innocent.json'), 'utf8') === innocentBefore,
+    'draw_ascii did not clobber the unrelated sprite either');
 
   // ------------------------------------------------------------- rendering
   section('rendering');
