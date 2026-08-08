@@ -157,6 +157,11 @@
   #galGrid {
     flex: 1; overflow-y: auto; padding: 14px;
     display: grid; gap: 14px; align-content: start;
+    /* .gcard sets overflow:hidden for its rounded corners, which gives it an
+       automatic minimum size of zero — so these rows would collapse and the
+       default align-items:stretch would squash every card into the gap,
+       clipping the name and buttons. Size rows to their content instead. */
+    grid-auto-rows: max-content;
     grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
   }
   #galEmpty { display: none; padding: 40px; text-align: center; }
