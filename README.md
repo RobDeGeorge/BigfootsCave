@@ -1,5 +1,7 @@
 # Bigfoot's Cave — Pixel Art Engine
 
+![Bigfoot's Cave](https://robdegeorge.github.io/BigfootsCave/brand/og.png)
+
 A place to make pixel art for your other projects — buttons, banners, icons, sprite
 animations — and a way for AI agents to make it too, into the same library.
 

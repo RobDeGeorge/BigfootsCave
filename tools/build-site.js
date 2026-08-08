@@ -15,6 +15,7 @@ const path = require('path');
 const S = require('../lib/sprite');
 const { encodePNG } = require('../lib/png');
 const { encodeGIF } = require('../lib/gif');
+const { buildCard } = require('./social-card');
 
 const ROOT = path.join(__dirname, '..');
 const LIBRARY = process.env.PIXELART_LIBRARY || path.join(ROOT, 'library');
@@ -98,6 +99,38 @@ function gif(sprite, scale) {
   }));
 }
 
+/** GitHub Pages serves /404.html for any unknown path. */
+function notFoundPage(logo) {
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Not found — Bigfoot's Cave</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="/brand/icon.png">
+<style>
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+         background:#12100e; color:#e8ddd0; text-align:center;
+         font:15px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  img { image-rendering:pixelated; width:96px; height:96px; }
+  h1 { color:#f2b134; letter-spacing:.12em; text-transform:uppercase; font-size:20px; margin:18px 0 6px; }
+  p { color:#8b7d6d; margin:0 0 20px; }
+  a { color:#f2b134; }
+</style>
+</head>
+<body>
+  <div>
+    <img src="/${logo}" alt="">
+    <h1>Tracks lead nowhere</h1>
+    <p>There's nothing at this address.</p>
+    <a href="/">Back to the cave</a>
+  </div>
+</body>
+</html>
+`;
+}
+
 // -------------------------------------------------------------------- build
 
 function build() {
@@ -171,14 +204,21 @@ function build() {
   // Pick brand assets by preference, falling back to whatever exists.
   const pick = (...names) => names.map(n => sprites.find(s => s.name === n)).find(Boolean) || sprites[0];
   const logoSprite = pick('bigfoot-icon', 'bigfoot-face', 'bigfoot-stand');
-  const ogSprite = pick('bigfoot-banner', 'bigfoot-forest', 'bigfoot-face');
+
+  const loadSprite = name => {
+    try {
+      return S.validate(JSON.parse(fs.readFileSync(path.join(LIBRARY, name + '.json'), 'utf8')));
+    } catch (e) {
+      return null;
+    }
+  };
 
   const logo = write('brand/logo.png',
-    png(S.validate(JSON.parse(fs.readFileSync(path.join(LIBRARY, logoSprite.name + '.json'), 'utf8'))), 0,
-      fitScale(logoSprite.w, logoSprite.h, 112)));
+    png(loadSprite(logoSprite.name), 0, fitScale(logoSprite.w, logoSprite.h, 112)));
   const favicon = write('brand/icon.png',
-    png(S.validate(JSON.parse(fs.readFileSync(path.join(LIBRARY, logoSprite.name + '.json'), 'utf8'))), 0,
-      fitScale(logoSprite.w, logoSprite.h, 64)));
+    png(loadSprite(logoSprite.name), 0, fitScale(logoSprite.w, logoSprite.h, 64)));
+  const ogImage = write('brand/og.png',
+    buildCard(loadSprite, sprites.map(s => s.name)));
 
   // Sprite titles and tags are free text written by humans and agents, and they
   // get embedded in a <script> block. A literal "</script>" in any of them would
@@ -196,11 +236,25 @@ function build() {
     .replace(/__REPO__/g, REPO)
     .replace(/__LOGO__/g, logo)
     .replace(/__FAVICON__/g, favicon)
-    .replace(/__OGIMAGE__/g, ogSprite.png);
+    .replace(/__OGIMAGE__/g, ogImage);
 
   write('index.html', html);
   write('CNAME', DOMAIN + '\n');     // GitHub Pages custom domain
   write('.nojekyll', '');            // stop Pages eating files that start with _
+
+  // A site whose whole strategy is accumulating art needs to be indexable.
+  write('robots.txt',
+    'User-agent: *\nAllow: /\n\nSitemap: https://' + DOMAIN + '/sitemap.xml\n');
+  write('sitemap.xml',
+    '<?xml version="1.0" encoding="UTF-8"?>\n' +
+    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' +
+    '  <url>\n' +
+    '    <loc>https://' + DOMAIN + '/</loc>\n' +
+    '    <lastmod>' + built + '</lastmod>\n' +
+    '    <changefreq>weekly</changefreq>\n' +
+    '  </url>\n' +
+    '</urlset>\n');
+  write('404.html', notFoundPage(logo));
 
   const mb = (bytes / 1e6).toFixed(2);
   console.log('  built ' + sprites.length + ' sprites -> ' + path.relative(ROOT, OUT) + '/');
