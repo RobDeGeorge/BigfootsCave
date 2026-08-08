@@ -126,9 +126,14 @@
     transition: border-color .12s, transform .12s;
   }
   .card:hover { border-color: var(--amber); transform: translateY(-2px); }
+  /* Square while there's room, but never taller than the slider value. Grid
+     columns are `1fr`, so they stretch past --cell to fill the row; without the
+     cap that stretch became card height too and pushed the name off-screen at
+     the top of the range. */
   .thumb {
     display: flex; align-items: center; justify-content: center;
-    aspect-ratio: 1; padding: 12px; overflow: hidden;
+    aspect-ratio: 1; max-height: var(--cell, 160px);
+    padding: 12px; overflow: hidden;
   }
   /* Fill the cell rather than sitting at the asset's intrinsic size — a 16×16
      sprite at its natural size is a speck. object-fit keeps the aspect ratio. */
