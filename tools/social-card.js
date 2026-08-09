@@ -21,7 +21,16 @@ const S = require('../lib/sprite');
 const { encodePNG } = require('../lib/png');
 
 const W = 1200, H = 630;
-const BG = [0x12, 0x10, 0x0e];   // matches the site's --bg
+/**
+ * The editor's --panel-2, not its --bg.
+ *
+ * Sprites here are drawn straight onto the background with no card behind them,
+ * and pixel art outlines are near-black by convention — on the page background
+ * they lose their edges entirely. In the gallery these same sprites sit on the
+ * transparency checker, which is lighter than the page, and that is what makes
+ * them read. The card matches the checker rather than the page for that reason.
+ */
+const BG = [0x24, 0x2a, 0x20];
 
 /**
  * Tags kept off the card entirely.

@@ -159,12 +159,12 @@ function notFoundPage(logo) {
 <link rel="icon" href="${BASE}brand/icon.png">
 <style>
   body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
-         background:#12100e; color:#e8ddd0; text-align:center;
+         background:#10120e; color:#cfe0b8; text-align:center;
          font:15px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   img { image-rendering:pixelated; width:96px; height:96px; }
-  h1 { color:#f2b134; letter-spacing:.12em; text-transform:uppercase; font-size:20px; margin:18px 0 6px; }
-  p { color:#8b7d6d; margin:0 0 20px; }
-  a { color:#f2b134; }
+  h1 { color:#9bbc0f; letter-spacing:.12em; text-transform:uppercase; font-size:20px; margin:18px 0 6px; }
+  p { color:#7f8f6c; margin:0 0 20px; }
+  a { color:#9bbc0f; }
 </style>
 </head>
 <body>
