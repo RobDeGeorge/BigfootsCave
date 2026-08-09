@@ -116,8 +116,11 @@ async function main() {
 
   const list = await rpc('tools/list');
   const tools = list.result.tools;
-  ok(Array.isArray(tools) && tools.length === 19, 'tools/list advertises 19 tools', 'got ' + (tools || []).length);
+  ok(Array.isArray(tools) && tools.length === 23, 'tools/list advertises 23 tools', 'got ' + (tools || []).length);
   ok(tools.every(t => t.name && t.description && t.inputSchema), 'every tool has name, description, schema');
+  const missing = ['draw_ascii', 'draw_shapes', 'preview_sprite', 'preview_sprites', 'transform', 'import_reference', 'compare_reference']
+    .filter(n => !tools.some(t => t.name === n));
+  ok(!missing.length, 'the drawing and review tools are all advertised', 'missing ' + missing.join(','));
   const dupes = tools.map(t => t.name).filter((n, i, a) => a.indexOf(n) !== i);
   ok(!dupes.length, 'no duplicate tool names', dupes.join(','));
 
@@ -400,6 +403,260 @@ async function main() {
   r = await call('preview_sprite', { name: 'small', scale: 8 });
   const img2 = r.content.find(c => c.type === 'image');
   ok(img2 && Buffer.from(img2.data, 'base64').readUInt32BE(16) === 64, 'normal preview scales exactly');
+
+  section('png decoding');
+  {
+    const { encodePNG, decodePNG } = require('../lib/png');
+    const w = 7, h = 5, src = new Uint8Array(w * h * 4);
+    for (let i = 0; i < w * h; i++) {
+      src[i * 4] = (i * 9) & 255; src[i * 4 + 1] = 255 - ((i * 7) & 255);
+      src[i * 4 + 2] = (i * 31) & 255; src[i * 4 + 3] = i % 3 === 0 ? 0 : 255;
+    }
+    const back = decodePNG(encodePNG(w, h, src));
+    let diff = 0;
+    for (let i = 0; i < src.length; i++) if (src[i] !== back.rgba[i]) diff++;
+    ok(back.width === w && back.height === h, 'decodePNG recovers the dimensions');
+    ok(diff === 0, 'decodePNG round-trips every byte', diff + ' bytes differ');
+    let threw = '';
+    try { decodePNG(Buffer.from('<!DOCTYPE html>')); } catch (e) { threw = e.message; }
+    ok(/not a PNG/.test(threw), 'a non-PNG is rejected by signature', threw);
+    // an HTML error page saved as .png is the realistic failure, not a corrupt PNG
+    threw = '';
+    try { decodePNG(Buffer.alloc(4)); } catch (e) { threw = e.message; }
+    ok(!!threw, 'a truncated buffer is rejected rather than read out of bounds', threw);
+  }
+
+  section('reference resampling');
+  {
+    const R = require('../lib/reference');
+    // half-transparent black beside opaque white: alpha weighting must stop the
+    // transparent side dragging the average toward black
+    const w = 4, h = 1, src = new Uint8Array(w * h * 4);
+    for (let i = 0; i < 4; i++) {
+      const opaque = i >= 2;
+      src[i * 4] = src[i * 4 + 1] = src[i * 4 + 2] = opaque ? 255 : 0;
+      src[i * 4 + 3] = opaque ? 255 : 0;
+    }
+    const small = R.resample(src, w, h, 1, 1);
+    ok(small[0] === 255, 'resample weights colour by alpha (no dark halo)', 'got ' + small[0]);
+    ok(small[3] > 100 && small[3] < 160, 'resample averages alpha', 'got ' + small[3]);
+
+    const grad = new Uint8Array(64 * 4);
+    for (let i = 0; i < 64; i++) {
+      grad[i * 4] = i * 4; grad[i * 4 + 1] = 255 - i * 4; grad[i * 4 + 2] = 128; grad[i * 4 + 3] = 255;
+    }
+    const q = R.quantise(grad, 8, 8, 4);
+    ok(q.palette.length === 4, 'quantise returns the requested colour count', 'got ' + q.palette.length);
+    ok(q.palette.every(c => /^#[0-9a-f]{6}$/.test(c)), 'palette entries are hex colours', q.palette.join(' '));
+    ok(q.indices.length === 64 && q.indices.every(i => i >= 0 && i < 4), 'every pixel maps to a palette slot');
+    const ramp = R.byLuminance(q.palette);
+    ok(ramp.length === 4 && ramp[0] !== ramp[3], 'byLuminance orders the ramp');
+    // trim/fitInto: comparing a margin-heavy reference against a sprite that
+    // fills its canvas compares framing, not shape, unless both are trimmed.
+    const box = new Uint8Array(8 * 8 * 4);
+    for (let y = 1; y < 4; y++) for (let x = 5; x < 7; x++) {
+      const i = (y * 8 + x) * 4; box[i] = 200; box[i + 3] = 255;
+    }
+    const t = R.trim(box, 8, 8);
+    ok(t.width === 2 && t.height === 3, 'trim crops to the opaque bounding box',
+      t.width + '×' + t.height);
+    ok(t.rgba[3] === 255, 'the trimmed buffer starts at the subject');
+    const none = R.trim(new Uint8Array(8 * 8 * 4), 8, 8);
+    ok(none.width === 8 && none.height === 8, 'trimming a blank image returns it unchanged');
+    const fitted = R.fitInto(t.rgba, t.width, t.height, 8, 8);
+    let opaque = 0;
+    for (let i = 0; i < 64; i++) if (fitted[i * 4 + 3] > 0) opaque++;
+    ok(opaque > 0 && opaque < 64, 'fitInto scales the subject into the box with margin',
+      opaque + ' of 64 pixels opaque');
+
+    const empty = R.quantise(new Uint8Array(16), 2, 2, 4);
+    ok(empty.palette.length === 0 && empty.indices.every(i => i === -1),
+      'a fully transparent image quantises to nothing rather than throwing');
+  }
+
+  section('import_reference');
+  {
+    const { encodePNG } = require('../lib/png');
+    const w = 64, h = 64, img = new Uint8Array(w * h * 4);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4, inCircle = (x - 32) ** 2 + (y - 32) ** 2 < 24 * 24;
+      // Shaded, not flat: a flat subject legitimately quantises to one colour,
+      // which would not exercise the split at all.
+      img[i] = inCircle ? 120 + y * 2 : 30;
+      img[i + 1] = inCircle ? 40 + x : 30;
+      img[i + 2] = 60;
+      img[i + 3] = inCircle ? 255 : 0;
+    }
+    const refPath = path.join(TMP, 'ref.png');
+    fs.writeFileSync(refPath, encodePNG(w, h, img));
+
+    r = await call('import_reference', { path: refPath, width: 16, height: 16, colors: 4 });
+    ok(!r.isError && r.content.some(c => c.type === 'image'), 'import_reference returns a preview image', r.text);
+    ok(/16×16/.test(r.text) && /Sampled palette/.test(r.text), 'it reports the size and sampled palette', r.text);
+    ok(/#[0-9a-f]{6}/.test(r.text), 'the sampled palette contains real colours', r.text);
+
+    await call('create_sprite', { name: 'traced', width: 16, height: 16 });
+    r = await call('import_reference', { path: refPath, into: 'traced' });
+    ok(!r.isError && /Written into/.test(r.text), 'it can write into a sprite for tracing', r.text);
+    invariants('traced', 'import_reference into');
+    const traced = onDisk('traced');
+    ok(traced.palette.length > 1, 'the sprite palette was replaced with sampled colours',
+      traced.palette.join(' '));
+    const tpx = S.decodeRLE(traced.frames[0].layers[0].data, 16 * 16);
+    ok(tpx.some(v => v >= 0) && tpx.some(v => v < 0),
+      'the traced layer has both drawn and transparent pixels');
+
+    r = await call('import_reference', { path: refPath, into: 'traced', width: 32, height: 32 });
+    ok(r.isError && /32×32/.test(r.text), 'a size mismatch against the target sprite is explained', r.text);
+
+    r = await call('import_reference', { path: path.join(TMP, 'nope.png') });
+    ok(r.isError && /cannot read/.test(r.text), 'a missing reference file is reported', r.text);
+
+    section('compare_reference');
+    r = await call('compare_reference', { name: 'traced', path: refPath, scale: 3 });
+    ok(!r.isError && r.content.some(c => c.type === 'image'), 'compare_reference returns a panel', r.text);
+    ok(/silhouette/.test(r.text), 'the panel explains what to look at first', r.text);
+    r = await call('compare_reference', { name: 'no-such-sprite', path: refPath });
+    ok(r.isError, 'comparing a missing sprite is an error');
+  }
+
+  section('draw_shapes');
+  await call('create_sprite', { name: 'blob', width: 32, height: 32, palette: ['#000000'] });
+  r = await call('draw_shapes', {
+    name: 'blob',
+    shapes: [
+      { type: 'ellipse', cx: 16, cy: 18, rx: 11, ry: 9, fill: 'B' },
+      { type: 'line', x0: 9, y0: 10, x1: 4, y1: 2, thickness: 4, fill: 'B' },
+    ],
+    mirror: true,
+    shade: { B: { light: '1', mid: '2', dark: '3' } },
+    outline: [{ fills: ['1', '2', '3'], with: '4' }],
+    key: { 1: '#ffd98a', 2: '#f0a83c', 3: '#b06a18', 4: '#4a2808' },
+  });
+  ok(!r.isError, 'draw_shapes composites, shades and outlines', r.text);
+  invariants('blob', 'draw_shapes');
+  let blob = onDisk('blob');
+  let used = new Set(S.decodeRLE(blob.frames[0].layers[0].data, 32 * 32));
+  ok(used.size >= 4, 'shading produced more than one tone', 'tones: ' + used.size);
+
+  // The whole point of ellipse(): row widths must actually vary, or the caller
+  // has just drawn a rectangle again.
+  const px = S.decodeRLE(blob.frames[0].layers[0].data, 32 * 32);
+  const widths = new Set();
+  for (let y = 0; y < 32; y++) {
+    let n = 0;
+    for (let x = 0; x < 32; x++) if (px[y * 32 + x] >= 0) n++;
+    if (n) widths.add(n);
+  }
+  ok(widths.size > 4, 'ellipse yields varying row widths, not a rectangle', 'distinct widths: ' + widths.size);
+
+  // The ear was drawn only on the left, so mirror must have reproduced its
+  // shape on the right. Compare the silhouette, not the colours: shading runs
+  // after mirroring and its light comes from one corner, so the two halves are
+  // meant to differ in tone.
+  let asymmetric = 0;
+  for (let y = 0; y < 32; y++)
+    for (let x = 0; x < 16; x++)
+      if ((px[y * 32 + x] >= 0) !== (px[y * 32 + (31 - x)] >= 0)) asymmetric++;
+  ok(asymmetric === 0, 'mirror made the silhouette symmetric', asymmetric + ' mismatched pixels');
+
+  r = await call('draw_shapes', {
+    name: 'blob',
+    shapes: [{ type: 'ellipse', cx: 16, cy: 16, rx: 8, ry: 8, fill: 'B' }],
+    shade: { B: { light: '1', mid: '2', dark: '3' } },
+    key: { 1: '#ffffff' },
+  });
+  ok(r.isError && /not in the key/.test(r.text), 'shading without colours for every tone explains itself', r.text);
+
+  r = await call('draw_shapes', {
+    name: 'blob', shapes: [{ type: 'wat', fill: 'B' }], key: { B: 0 },
+  });
+  ok(r.isError && /unknown shape type/.test(r.text), 'unknown shape type explains itself', r.text);
+
+  r = await call('draw_shapes', {
+    name: 'blob', shapes: [{ type: 'ellipse', cx: 16, cy: 16, rx: 8, ry: 8 }], key: { B: 0 },
+  });
+  ok(r.isError && /fill/.test(r.text), 'a shape without a fill character is rejected', r.text);
+
+  section('form shading');
+  // The tell between form shading and contour shading is not where the
+  // highlight sits — both put it up-left — but whether it touches the outline.
+  // Contour shading's highlight *is* an edge band, so nearly all of it borders
+  // transparency. A lit volume's highlight is inset, ringed by mid tone.
+  await call('create_sprite', { name: 'ball', width: 24, height: 24, palette: ['#000000'] });
+  await call('draw_shapes', {
+    name: 'ball',
+    shapes: [{ type: 'ellipse', cx: 12, cy: 12, rx: 10, ry: 10, fill: 'B' }],
+    shade: { B: { tones: ['1', '2', '3', '4'] } },
+    key: { 1: '#ffffff', 2: '#cccccc', 3: '#888888', 4: '#333333' },
+    despeckle: false,
+  });
+  const ball = S.decodeRLE(onDisk('ball').frames[0].layers[0].data, 24 * 24);
+  const lightIdx = onDisk('ball').palette.indexOf('#ffffff');
+  let sx = 0, sy = 0, n = 0;
+  for (let y = 0; y < 24; y++) for (let x = 0; x < 24; x++) {
+    if (ball[y * 24 + x] === lightIdx) { sx += x; sy += y; n++; }
+  }
+  ok(n > 0, 'the highlight tone is present');
+  ok(n && sx / n < 11 && sy / n < 11, 'the highlight sits toward the light',
+    n ? 'highlight centroid ' + (sx / n).toFixed(1) + ',' + (sy / n).toFixed(1) : 'none');
+  let touching = 0;
+  for (let y = 0; y < 24; y++) for (let x = 0; x < 24; x++) {
+    if (ball[y * 24 + x] !== lightIdx) continue;
+    const border = [[1, 0], [-1, 0], [0, 1], [0, -1]]
+      .some(([dx, dy]) => (ball[(y + dy) * 24 + (x + dx)] ?? -1) < 0);
+    if (border) touching++;
+  }
+  ok(n > 0 && touching / n < 0.25,
+    'the highlight is inset, not a band on the outline (contour shading)',
+    touching + ' of ' + n + ' highlight pixels touch the silhouette edge');
+  // and the darkest tone must land opposite it
+  const darkIdx = onDisk('ball').palette.indexOf('#333333');
+  let dx = 0, dy = 0, dn = 0;
+  for (let y = 0; y < 24; y++) for (let x = 0; x < 24; x++) {
+    if (ball[y * 24 + x] === darkIdx) { dx += x; dy += y; dn++; }
+  }
+  ok(dn > 0 && dx / dn > 12 && dy / dn > 12, 'the shadow falls on the far side',
+    dn ? 'shadow centroid ' + (dx / dn).toFixed(1) + ',' + (dy / dn).toFixed(1) : 'no shadow tone');
+
+  section('silhouette preview');
+  r = await call('preview_sprite', { name: 'ball', scale: 4, silhouette: true });
+  const sil = r.content.find(c => c.type === 'image');
+  ok(!!sil, 'preview_sprite returns a silhouette image');
+  ok(/silhouette/.test(r.text), 'the silhouette preview says what it is for', r.text);
+
+  section('draw_ascii row validation');
+  await call('create_sprite', { name: 'ruler', width: 16, height: 16, palette: ['#000000'] });
+  r = await call('draw_ascii', { name: 'ruler', rows: ['####', '########'], key: { '#': 0 } });
+  ok(/shorter than 16/.test(r.text), 'short rows are reported, not silently padded', r.text);
+  ok(/rows 0, 1/.test(r.text), 'the offending rows are named', r.text);
+
+  section('despeckle');
+  await call('create_sprite', { name: 'speck', width: 8, height: 8, palette: ['#000000', '#ffffff'] });
+  // one lone pixel in open space, plus a solid block that must survive
+  await call('draw_ascii', { name: 'speck', rows: ['........', '..#.....', '........', '....##..', '....##..'], key: { '#': 1 } });
+  r = await call('transform', { name: 'speck', op: 'despeckle' });
+  ok(!r.isError, 'despeckle runs', r.text);
+  const speck = S.decodeRLE(onDisk('speck').frames[0].layers[0].data, 64);
+  ok(speck[1 * 8 + 2] < 0, 'the lone pixel is absorbed');
+  ok(speck[3 * 8 + 4] === 1 && speck[4 * 8 + 5] === 1, 'the solid block survives');
+  invariants('speck', 'despeckle');
+
+  section('preview_sprites');
+  r = await call('preview_sprites', { names: ['blob', 'small'], scale: 2, cols: 2 });
+  const sheet = r.content.find(c => c.type === 'image');
+  ok(!!sheet, 'preview_sprites returns one contact sheet image');
+  if (sheet) {
+    const buf = Buffer.from(sheet.data, 'base64');
+    const w = buf.readUInt32BE(16), h = buf.readUInt32BE(20);
+    // two 32px-cell columns at 2x plus padding; must be wider than one cell
+    ok(w > 32 * 2 && h > 0, 'the sheet is laid out as a grid', w + 'x' + h);
+  }
+  ok(/blob/.test(r.text) && /small/.test(r.text), 'the sheet legend names the sprites in order', r.text);
+  r = await call('preview_sprites', { names: ['blob', 'ghost-sprite'], scale: 2 });
+  ok(/not found/.test(r.text), 'a missing sprite is reported without failing the batch', r.text);
+  r = await call('preview_sprites', { names: [] });
+  ok(r.isError, 'an empty name list is an error');
 
   // ----------------------------------------------------------- error paths
   section('error handling');

@@ -13,9 +13,12 @@
  */
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const S = require('../lib/sprite');
-const { encodePNG } = require('../lib/png');
+const G = require('../lib/shapes');
+const REF = require('../lib/reference');
+const { encodePNG, decodePNG } = require('../lib/png');
 const { encodeGIF } = require('../lib/gif');
 
 const LIBRARY = process.env.PIXELART_LIBRARY || path.join(__dirname, '..', 'library');
@@ -119,6 +122,91 @@ function resolveKey(key, sprite) {
 function pngOf(sprite, frame, scale) {
   scale = S.clampScale(sprite.w, sprite.h, scale, 1);
   const { width, height, rgba } = S.frameToRGBA(sprite, frame, scale);
+  return encodePNG(width, height, rgba);
+}
+
+const MAX_REFERENCE_BYTES = 32 * 1024 * 1024;
+
+/**
+ * Load a reference image off local disk.
+ *
+ * Unlike export_sprite, this path is deliberately not confined to a project
+ * folder. A reference lives wherever the user keeps it, and confining reads
+ * here would buy nothing: whatever is driving this server can already read
+ * files by other means, so a jail would be inconvenience without security.
+ * Writes are the dangerous direction, and those are still fenced by
+ * safeExportPath.
+ */
+function loadReference(p) {
+  if (typeof p !== 'string' || !p.trim()) throw new Error('path is required');
+  const full = path.resolve(p.replace(/^~(?=\/|$)/, os.homedir()));
+  let stat;
+  try { stat = fs.statSync(full); }
+  catch (e) { throw new Error('cannot read "' + full + '": ' + e.code); }
+  if (stat.isDirectory()) throw new Error('"' + full + '" is a directory, not an image');
+  if (stat.size > MAX_REFERENCE_BYTES) {
+    throw new Error('reference is ' + Math.round(stat.size / 1048576) + 'MB; the limit is 32MB');
+  }
+  const decoded = decodePNG(fs.readFileSync(full));
+  return { ...decoded, path: full };
+}
+
+/** Composite equal-sized RGBA cells into one labelled grid image. */
+function panelPNG(cells, cw, ch, cols, pad = 4) {
+  const rows = Math.ceil(cells.length / cols);
+  const W = cw * cols + pad * (cols + 1), H = ch * rows + pad * (rows + 1);
+  const out = new Uint8Array(W * H * 4);
+  for (let i = 0; i < W * H; i++) {                       // neutral backdrop
+    out[i * 4] = out[i * 4 + 1] = out[i * 4 + 2] = 0xe8;
+    out[i * 4 + 3] = 255;
+  }
+  cells.forEach((cell, i) => {
+    const ox = (i % cols) * (cw + pad) + pad, oy = Math.floor(i / cols) * (ch + pad) + pad;
+    for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) {
+      const s = (y * cw + x) * 4, d = ((oy + y) * W + ox + x) * 4;
+      const a = cell[s + 3] / 255;
+      for (let c = 0; c < 3; c++) out[d + c] = Math.round(cell[s + c] * a + out[d + c] * (1 - a));
+    }
+  });
+  return encodePNG(W, H, out);
+}
+
+/** Blow an RGBA buffer up by an integer factor so it can actually be judged. */
+function zoom(rgba, w, h, scale) {
+  const out = new Uint8Array(w * scale * h * scale * 4);
+  for (let y = 0; y < h * scale; y++) for (let x = 0; x < w * scale; x++) {
+    const s = ((y / scale | 0) * w + (x / scale | 0)) * 4, d = (y * w * scale + x) * 4;
+    out[d] = rgba[s]; out[d + 1] = rgba[s + 1]; out[d + 2] = rgba[s + 2]; out[d + 3] = rgba[s + 3];
+  }
+  return out;
+}
+
+/** Flatten opaque pixels of an RGBA buffer to one colour. */
+function flatten(rgba) {
+  const out = new Uint8Array(rgba.length);
+  for (let i = 0; i < rgba.length / 4; i++) {
+    const on = rgba[i * 4 + 3] > 0;
+    out[i * 4] = out[i * 4 + 1] = out[i * 4 + 2] = on ? 0x18 : 0xf4;
+    out[i * 4 + 3] = 255;
+  }
+  return out;
+}
+
+/**
+ * Flatten every opaque pixel to one colour — the squint test, mechanised.
+ *
+ * A sprite is only readable if its outline alone identifies it. Colour and
+ * detail hide a weak silhouette very effectively, so the shape has to be judged
+ * with both taken away, before any time goes into shading or faces.
+ */
+function silhouetteOf(sprite, frame, scale) {
+  scale = S.clampScale(sprite.w, sprite.h, scale, 1);
+  const { width, height, rgba } = S.frameToRGBA(sprite, frame, scale);
+  for (let i = 0; i < width * height; i++) {
+    const opaque = rgba[i * 4 + 3] > 0;
+    rgba[i * 4] = rgba[i * 4 + 1] = rgba[i * 4 + 2] = opaque ? 0x18 : 0xf4;
+    rgba[i * 4 + 3] = 255;
+  }
   return encodePNG(width, height, rgba);
 }
 
@@ -247,6 +335,136 @@ const TOOLS = [
     },
   },
   {
+    name: 'draw_shapes',
+    description:
+      'Build a sprite from geometry instead of hand-counted rows — the better starting point for anything with a curve. ' +
+      'Shapes are composited in order into a character grid, then optionally shaded, outlined and cleaned, ' +
+      'and finally coloured through the same character key draw_ascii uses. ' +
+      'Prefer this for bodies, heads, limbs and tails; use draw_ascii (mode "over") afterwards for faces and small detail. ' +
+      'Shape types: ellipse (cx,cy,rx,ry), circle (cx,cy,r), rect (x0,y0,x1,y1), line (x0,y0,x1,y1,thickness), ' +
+      'path (points,thickness), rows (rows,x,y). Every shape takes a "fill" character.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        shapes: {
+          type: 'array',
+          description: 'Shapes composited in order, later ones drawing over earlier ones.',
+          items: {
+            type: 'object',
+            properties: {
+              type: { type: 'string', enum: ['ellipse', 'circle', 'rect', 'line', 'path', 'rows'] },
+              fill: { type: 'string', description: 'The character this shape writes.' },
+              cx: { type: 'number' }, cy: { type: 'number' },
+              rx: { type: 'number' }, ry: { type: 'number' }, r: { type: 'number' },
+              x0: { type: 'number' }, y0: { type: 'number' },
+              x1: { type: 'number' }, y1: { type: 'number' },
+              thickness: { type: 'number', description: 'For line/path: stroke width in pixels.' },
+              points: { type: 'array', items: { type: 'array', items: { type: 'number' } }, description: 'For path: [[x,y],...].' },
+              rows: { type: 'array', items: { type: 'string' }, description: 'For rows: ascii to stamp.' },
+              x: { type: 'number' }, y: { type: 'number' },
+            },
+            required: ['type'],
+          },
+        },
+        key: { type: 'object', description: 'Character -> palette index or #rrggbb, same as draw_ascii.' },
+        shade: {
+          type: 'object',
+          description:
+            'Optional shading, applied before outlining. Maps a fill character either to ' +
+            '{"tones":["1","2","3","4"]} lightest-first (4 tones read better than 3), or to ' +
+            '{"light","mid","dark"}. Each connected region is lit as a volume: a broad highlight ' +
+            'offset toward the light, a terminator curving across the form, shadow on the far side. ' +
+            'Flat fills are the main thing that makes sprite art look like clip art.',
+        },
+        shadeMode: {
+          type: 'string', enum: ['form', 'rim'],
+          description: '"form" (default) lights each region as a volume. "rim" gives a flat contour band — occasionally right for graphic icons, but it is what makes art look bevelled rather than lit.',
+        },
+        light: {
+          type: 'array', items: { type: 'number' },
+          description: 'Light direction [dx, dy], default [-1,-1] (top-left). Keep it the same across a set.',
+        },
+        outline: {
+          type: 'array',
+          description:
+            'Optional 1px borders, applied in order. Each entry is {fills:[chars], with:char}. ' +
+            'Outline each part with a dark tint of its own colour rather than one black keyline for everything — ' +
+            'a single keyline flattens the parts together.',
+          items: {
+            type: 'object',
+            properties: {
+              fills: { type: 'array', items: { type: 'string' } },
+              with: { type: 'string' },
+            },
+            required: ['fills', 'with'],
+          },
+        },
+        mirror: { type: 'boolean', description: 'Mirror the left half onto the right before shading. Most creatures are symmetric front-on.' },
+        despeckle: { type: 'boolean', description: 'Absorb stray single pixels into their neighbours. Default true.' },
+        frame: { type: 'number' },
+        layer: { type: 'number' },
+        mode: { type: 'string', enum: ['replace', 'over'], description: '"replace" (default) clears the layer first.' },
+      },
+      required: ['name', 'shapes', 'key'],
+    },
+  },
+  {
+    name: 'import_reference',
+    description:
+      'Load a local PNG as drawing reference. Shrinks it to sprite size and reduces it to a small ' +
+      'palette, then returns both the shrunk image and the sampled colours. ' +
+      'Do this before drawing anything you want to look like a real subject: a reference only tells ' +
+      'you which features survive once it is 32 pixels wide, and sampled colours beat guessed ones. ' +
+      'Pass "into" to lay the result into a sprite layer to trace over.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Path to a PNG on this machine. "~" is expanded.' },
+        trim: { type: 'boolean', description: 'Crop the reference to its subject before fitting, so it fills the sprite instead of keeping the source margin. Default true.' },
+        width: { type: 'number', description: 'Target width. Defaults to the "into" sprite\'s size, else 32.' },
+        height: { type: 'number', description: 'Target height.' },
+        colors: { type: 'number', description: 'Palette size to reduce to, 1-64. Default 8.' },
+        into: { type: 'string', description: 'Optional sprite name to write the result into, for tracing.' },
+        layer: { type: 'number', description: 'Layer index to write into when using "into". Default 0.' },
+        scale: { type: 'number', description: 'Magnification of the returned preview. Default 8.' },
+      },
+      required: ['path'],
+    },
+  },
+  {
+    name: 'compare_reference',
+    description:
+      'Put a sprite and a reference image side by side, each with its silhouette, in one image. ' +
+      'This is the correction loop: it shows proportion and shape errors that are invisible when ' +
+      'looking at the sprite on its own.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Sprite to judge.' },
+        path: { type: 'string', description: 'Path to the reference PNG.' },
+        frame: { type: 'number' },
+        scale: { type: 'number', description: 'Magnification, default 6.' },
+      },
+      required: ['name', 'path'],
+    },
+  },
+  {
+    name: 'preview_sprites',
+    description:
+      'Render several sprites into one contact sheet image. Use this to review a batch in a single ' +
+      'look instead of one round trip per sprite.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        names: { type: 'array', items: { type: 'string' }, description: 'Sprite names, up to 64.' },
+        scale: { type: 'number', description: 'Pixel magnification, default 4.' },
+        cols: { type: 'number', description: 'Columns in the grid. Default is roughly square.' },
+      },
+      required: ['names'],
+    },
+  },
+  {
     name: 'set_pixels',
     description: 'Set individual pixels. Good for small touch-ups after draw_ascii. Use index -1 to erase.',
     inputSchema: {
@@ -316,7 +534,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         name: { type: 'string' },
-        op: { type: 'string', enum: ['flip_x', 'flip_y', 'rotate_cw', 'shift', 'outline'], description: 'rotate_cw needs a square sprite. outline traces a 1px border in outlineColor.' },
+        op: { type: 'string', enum: ['flip_x', 'flip_y', 'rotate_cw', 'shift', 'outline', 'despeckle'], description: 'rotate_cw needs a square sprite. outline traces a 1px border in outlineColor. despeckle absorbs stray single pixels into their neighbours.' },
         dx: { type: 'number', description: 'For "shift": horizontal offset in pixels.' },
         dy: { type: 'number', description: 'For "shift": vertical offset in pixels.' },
         outlineColor: { type: 'string', description: 'For "outline": a #rrggbb colour. Default the darkest palette entry.' },
@@ -336,6 +554,13 @@ const TOOLS = [
         frame: { type: 'number', description: 'Frame index, default 0.' },
         scale: { type: 'number', description: 'Pixel magnification, default 8. Small sprites are hard to judge at 1:1.' },
         sheet: { type: 'boolean', description: 'Render all frames side by side instead of one frame.' },
+        silhouette: {
+          type: 'boolean',
+          description:
+            'Flatten every opaque pixel to one colour. Check this BEFORE shading or detailing: ' +
+            'colour and detail disguise a weak shape, and if the silhouette is not identifiable ' +
+            'on its own, no amount of shading will save it.',
+        },
       },
       required: ['name'],
     },
@@ -543,6 +768,17 @@ const HANDLERS = {
       }
       const wide = a.rows.filter(r => r.length > sprite.w).length;
       if (wide) warnings.push(wide + ' row(s) are wider than ' + sprite.w + ' pixels and were cropped');
+      // A short row is padded with transparency, which silently eats the right
+      // edge of the art. That reads as "the shape came out wrong" rather than
+      // "I miscounted", so it has to be called out by row number.
+      const short = a.rows
+        .map((r, i) => (r.length && r.length < sprite.w ? i : -1))
+        .filter(i => i >= 0);
+      if (short.length) {
+        warnings.push(short.length + ' row(s) are shorter than ' + sprite.w +
+          ' pixels and were padded with transparency (rows ' +
+          short.slice(0, 8).join(', ') + (short.length > 8 ? ', …' : '') + ')');
+      }
     }
 
     for (let ry = 0; ry < a.rows.length; ry++) {
@@ -567,6 +803,199 @@ const HANDLERS = {
     return text('Drew into "' + sprite.name + '" frame ' + f + ', layer ' + l + '.' +
       (warnings.length ? '\n\nHeads up: ' + warnings.join('; ') + '.' : '') +
       '\n\nCall preview_sprite to see how it actually looks.');
+  },
+
+  draw_shapes(a) {
+    const sprite = load(a.name);
+    const f = checkIndex(a.frame == null ? 0 : a.frame, sprite.frames.length, 'frame');
+    const l = checkIndex(a.layer == null ? 0 : a.layer, sprite.frames[f].layers.length, 'layer');
+
+    if (!Array.isArray(a.shapes) || !a.shapes.length) throw new Error('shapes must be a non-empty array');
+
+    const grid = G.blank(sprite.w, sprite.h);
+    for (let i = 0; i < a.shapes.length; i++) {
+      const s = a.shapes[i];
+      if (s.type !== 'rows' && (typeof s.fill !== 'string' || s.fill.length !== 1)) {
+        throw new Error('shapes[' + i + '] needs a single-character "fill"');
+      }
+      try {
+        G.apply(grid, s);
+      } catch (e) {
+        throw new Error('shapes[' + i + ']: ' + e.message);
+      }
+    }
+
+    if (a.mirror) G.mirror(grid);
+    if (a.shade) G.shade(grid, a.shade, { mode: a.shadeMode, light: a.light });
+    if (a.despeckle !== false) G.despeckle(grid);
+    for (const o of (a.outline || [])) {
+      if (!Array.isArray(o.fills) || typeof o.with !== 'string') {
+        throw new Error('each outline entry needs {fills: [chars], with: char}');
+      }
+      G.outline(grid, o.fills, o.with);
+    }
+
+    // Resolve colours only now — shade/outline invent characters that were
+    // never in any shape, and they all have to exist in the key.
+    const key = resolveKey(a.key, sprite);
+    const px = a.mode === 'over' ? pixelsOf(sprite, f, l) : new Int16Array(sprite.w * sprite.h).fill(-1);
+    const unknown = new Set();
+    for (let y = 0; y < sprite.h; y++) {
+      for (let x = 0; x < sprite.w; x++) {
+        const ch = grid[y][x];
+        if (ch === '.' && key['.'] == null) continue;
+        if (ch === ' ' && key[' '] == null) continue;
+        const v = key[ch];
+        if (v == null) { unknown.add(ch); continue; }
+        px[y * sprite.w + x] = v;
+      }
+    }
+    if (unknown.size) {
+      throw new Error('these characters ended up in the picture but are not in the key: ' +
+        [...unknown].map(c => '"' + c + '"').join(', ') +
+        '. Shade and outline produce new characters — every light/mid/dark and every ' +
+        'outline "with" character needs a colour too.');
+    }
+
+    setPixelsOf(sprite, f, l, px);
+    save(sprite);
+    return text('Drew ' + a.shapes.length + ' shape(s) into "' + sprite.name + '" frame ' + f + ', layer ' + l + '.' +
+      (a.shade ? ' Shaded.' : '') + ((a.outline || []).length ? ' Outlined.' : '') +
+      '\n\nCall preview_sprite to see how it actually looks.');
+  },
+
+  import_reference(a) {
+    const src = loadReference(a.path);
+    const target = a.into ? load(a.into) : null;
+    const tw = Math.max(1, Math.min(512, Math.round(a.width || (target ? target.w : 32))));
+    const th = Math.max(1, Math.min(512, Math.round(a.height || (target ? target.h : tw))));
+    const colors = Math.max(1, Math.min(64, Math.round(a.colors || 8)));
+
+    // Reference art is usually mostly margin. Resampling the whole canvas would
+    // land the subject in the middle of the sprite at half size, so trim to the
+    // subject and fit it to the frame, preserving aspect ratio.
+    const crop = a.trim === false
+      ? { rgba: src.rgba, width: src.width, height: src.height }
+      : REF.trim(src.rgba, src.width, src.height);
+    const fitted = REF.fitInto(crop.rgba, crop.width, crop.height, tw, th);
+    const { palette, indices } = REF.quantise(fitted, tw, th, colors);
+    const out = { palette, indices };
+    const ramp = REF.byLuminance(out.palette);
+
+    // Render the quantised result, which is what the sprite would actually be —
+    // not the smooth downscale, which flatters the reference.
+    const shown = new Uint8Array(tw * th * 4);
+    out.indices.forEach((idx, i) => {
+      if (idx < 0) return;
+      const c = out.palette[idx];
+      shown[i * 4] = parseInt(c.slice(1, 3), 16);
+      shown[i * 4 + 1] = parseInt(c.slice(3, 5), 16);
+      shown[i * 4 + 2] = parseInt(c.slice(5, 7), 16);
+      shown[i * 4 + 3] = 255;
+    });
+
+    const scale = Math.max(1, Math.min(32, Math.round(a.scale || 8)));
+    const png = panelPNG(
+      [zoom(shown, tw, th, scale), zoom(flatten(shown), tw, th, scale)],
+      tw * scale, th * scale, 2);
+
+    let wrote = '';
+    if (target) {
+      const l = checkIndex(a.layer == null ? 0 : a.layer, target.frames[0].layers.length, 'layer');
+      if (tw !== target.w || th !== target.h) {
+        throw new Error('reference resolves to ' + tw + '×' + th + ' but "' + target.name +
+          '" is ' + target.w + '×' + target.h + '. Omit width/height to match the sprite.');
+      }
+      target.palette = out.palette.slice();
+      setPixelsOf(target, 0, l, Int16Array.from(out.indices));
+      save(target);
+      wrote = '\n\nWritten into "' + target.name + '" layer ' + l +
+        ' and its palette replaced. Trace over it on another layer, then delete this one.';
+    }
+
+    return {
+      content: [
+        { type: 'image', data: png.toString('base64'), mimeType: 'image/png' },
+        { type: 'text', text:
+          path.basename(src.path) + ' — ' + src.width + '×' + src.height + ' reduced to ' +
+          tw + '×' + th + ' in ' + out.palette.length + ' colours.\n' +
+          'Left: what the reference becomes at sprite size. Right: its silhouette — this is the ' +
+          'shape you have to hit.\n\nSampled palette, light to dark:\n  ' + ramp.join('  ') + wrote },
+      ],
+    };
+  },
+
+  compare_reference(a) {
+    const sprite = load(a.name);
+    const src = loadReference(a.path);
+    const f = checkIndex(a.frame == null ? 0 : a.frame, sprite.frames.length, 'frame');
+    const scale = Math.max(1, Math.min(32, Math.round(a.scale || 6)));
+
+    // Trim both to their subjects and fit them into the same box, so the
+    // comparison is about shape rather than how much margin each one carries.
+    const cropMine = REF.trim(S.frameToRGBA(sprite, f, 1).rgba, sprite.w, sprite.h);
+    const cropRef = REF.trim(src.rgba, src.width, src.height);
+    const box = Math.max(sprite.w, sprite.h);
+    const mine = REF.fitInto(cropMine.rgba, cropMine.width, cropMine.height, box, box);
+    const theirs = REF.fitInto(cropRef.rgba, cropRef.width, cropRef.height, box, box);
+    const cells = [
+      zoom(mine, box, box, scale),
+      zoom(theirs, box, box, scale),
+      zoom(flatten(mine), box, box, scale),
+      zoom(flatten(theirs), box, box, scale),
+    ];
+    const png = panelPNG(cells, box * scale, box * scale, 2);
+    return {
+      content: [
+        { type: 'image', data: png.toString('base64'), mimeType: 'image/png' },
+        { type: 'text', text:
+          'Top row: "' + sprite.name + '" then ' + path.basename(src.path) + ', both trimmed to their subject and scaled to match.\n' +
+          'Bottom row: the same two as silhouettes.\n' +
+          'Compare the silhouettes first — proportion errors show there and hide everywhere else.' },
+      ],
+    };
+  },
+
+  preview_sprites(a) {
+    if (!Array.isArray(a.names) || !a.names.length) throw new Error('names must be a non-empty array');
+    if (a.names.length > 64) throw new Error('at most 64 sprites per contact sheet; got ' + a.names.length);
+
+    const loaded = a.names.map(n => {
+      try { return { name: n, sprite: load(n) }; }
+      catch (e) { return { name: n, error: e.message }; }
+    });
+    const ok = loaded.filter(r => r.sprite);
+    if (!ok.length) throw new Error('none of those sprites could be loaded');
+
+    const scale = Math.max(1, Math.min(32, Math.round(a.scale || 4)));
+    const cols = Math.max(1, Math.round(a.cols || Math.ceil(Math.sqrt(ok.length))));
+    const rows = Math.ceil(ok.length / cols);
+    const pad = 2;
+    // One cell size for every sprite, so a mixed-size batch still lines up.
+    const cw = Math.max(...ok.map(r => r.sprite.w)) * scale + pad * 2;
+    const ch = Math.max(...ok.map(r => r.sprite.h)) * scale + pad * 2;
+    const W = cw * cols, H = ch * rows;
+    const rgba = new Uint8Array(W * H * 4);
+
+    ok.forEach((r, i) => {
+      const cell = S.frameToRGBA(r.sprite, 0, scale);
+      const sw = r.sprite.w * scale, sh = r.sprite.h * scale;
+      const ox = (i % cols) * cw + pad + Math.floor((cw - pad * 2 - sw) / 2);
+      const oy = Math.floor(i / cols) * ch + pad + Math.floor((ch - pad * 2 - sh) / 2);
+      for (let y = 0; y < sh; y++) {
+        rgba.set(cell.rgba.subarray(y * sw * 4, (y + 1) * sw * 4), ((oy + y) * W + ox) * 4);
+      }
+    });
+
+    const missing = loaded.filter(r => r.error);
+    return {
+      content: [
+        { type: 'image', data: encodePNG(W, H, rgba).toString('base64'), mimeType: 'image/png' },
+        { type: 'text', text: ok.length + ' sprite(s) at ' + scale + '×, ' + cols + ' per row, reading left to right:\n' +
+          ok.map((r, i) => '  ' + (i + 1) + '. ' + r.sprite.name).join('\n') +
+          (missing.length ? '\n\nnot found: ' + missing.map(r => r.name + ' (' + r.error + ')').join(', ') : '') },
+      ],
+    };
   },
 
   set_pixels(a) {
@@ -695,6 +1124,27 @@ const HANDLERS = {
               if (touches) out[y * sprite.w + x] = outlineIdx;
             }
           }
+        } else if (a.op === 'despeckle') {
+          // 8-connectivity on purpose: a diagonal outline run is a real edge,
+          // and a 4-connected test would eat it.
+          out.set(src);
+          const N = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+          for (let y = 0; y < sprite.h; y++) {
+            for (let x = 0; x < sprite.w; x++) {
+              const me = src[y * sprite.w + x];
+              const nb = [];
+              for (const [dx, dy] of N) {
+                const nx = x + dx, ny = y + dy;
+                if (nx >= 0 && ny >= 0 && nx < sprite.w && ny < sprite.h) nb.push(src[ny * sprite.w + nx]);
+              }
+              if (nb.some(v => v === me)) continue;
+              const tally = new Map();
+              nb.forEach(v => tally.set(v, (tally.get(v) || 0) + 1));
+              let best = me, bestN = -1;
+              tally.forEach((n, v) => { if (n > bestN) { bestN = n; best = v; } });
+              out[y * sprite.w + x] = best;
+            }
+          }
         } else {
           const dx = Math.round(a.dx || 0), dy = Math.round(a.dy || 0);
           for (let y = 0; y < sprite.h; y++) {
@@ -719,13 +1169,16 @@ const HANDLERS = {
   preview_sprite(a) {
     const sprite = load(a.name);
     const scale = Math.max(1, Math.min(32, Math.round(a.scale || 8)));
-    const png = a.sheet ? sheetOf(sprite, scale, 0)
-                        : pngOf(sprite, checkIndex(a.frame == null ? 0 : a.frame, sprite.frames.length, 'frame'), scale);
+    const frame = checkIndex(a.frame == null ? 0 : a.frame, sprite.frames.length, 'frame');
+    const png = a.silhouette ? silhouetteOf(sprite, frame, scale)
+              : a.sheet ? sheetOf(sprite, scale, 0)
+              : pngOf(sprite, frame, scale);
     return {
       content: [
         { type: 'image', data: png.toString('base64'), mimeType: 'image/png' },
         { type: 'text', text: sprite.name + ' — ' + sprite.w + '×' + sprite.h + ' at ' + scale + '× magnification' +
-          (a.sheet ? ', all ' + sprite.frames.length + ' frames' : '') },
+          (a.silhouette ? ', silhouette only — if you cannot tell what this is, fix the shape before anything else'
+            : a.sheet ? ', all ' + sprite.frames.length + ' frames' : '') },
       ],
     };
   },
@@ -918,14 +1371,25 @@ const SERVER_INFO = { name: 'pixelart', version: '1.0.0' };
 const INSTRUCTIONS = [
   'This server draws and stores pixel art in a shared library that a human also edits in a browser.',
   '',
-  'The usual loop is: list_palettes -> create_sprite -> draw_ascii -> preview_sprite -> adjust -> export_sprite.',
+  'The usual loop is: list_palettes -> create_sprite -> draw_shapes -> preview_sprite -> adjust -> export_sprite.',
   'Always call preview_sprite after drawing. Pixel art is unforgiving and reading back ASCII is not the same as seeing it.',
+  '',
+  'Which drawing tool to reach for:',
+  '- draw_shapes for anything with a curve — bodies, heads, limbs, tails. You name centres and radii',
+  '  and get real geometry. Writing curves as ascii means counting characters per row, and the usual',
+  '  failure is constant-width rows, which come out as a rounded rectangle no matter what was intended.',
+  '- draw_ascii with mode "over" for faces and small detail, stamped on top of the shapes.',
+  '- preview_sprites to review a whole batch in one image rather than one round trip each.',
   '',
   'Advice that makes the art better:',
   '- Keep palettes small. Four to sixteen colours is plenty; more looks muddy at these sizes.',
   '- Work at the smallest size that carries the idea, then export at 4x or 8x rather than drawing large.',
-  '- Give shapes a dark outline and put the light source in one consistent corner.',
+  '- Use the "shade" option rather than a flat fill. Three tones against one light source is the',
+  '  difference between a lit form and a flat sticker, and it costs nothing to ask for.',
+  '- Outline each part with a dark tint of its own colour, not one black keyline over everything.',
+  '  A single keyline welds the parts together and is most of what makes art read as clip art.',
   '- Avoid single stray pixels along a diagonal; they read as noise rather than as an edge.',
+  '  draw_shapes cleans these up by default, and transform op "despeckle" fixes existing art.',
 ].join('\n');
 
 function reply(id, result) { write({ jsonrpc: '2.0', id: id, result: result }); }
