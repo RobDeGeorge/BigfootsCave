@@ -83,9 +83,20 @@ function fitScale(w, h, target) {
  * by what a first-time visitor should see: the big characters and scenes, then
  * the interface work, then the long tail.
  */
-const FEATURE_ORDER = ['bigfoot', 'scene', 'character', 'flower', 'anim', 'banner', 'portrait'];
+const FEATURE_ORDER = ['retro', 'scene', 'character', 'flower', 'anim', 'banner', 'portrait'];
+
+/**
+ * Tags that sink below everything else, whatever else they carry.
+ *
+ * The bigfoot set stays in the library and stays searchable — it is just not
+ * what the site leads with any more. This has to be tested *before*
+ * FEATURE_ORDER, because those sprites are also tagged `scene` and `character`
+ * and would otherwise walk straight back onto the front page.
+ */
+const DEMOTE = ['bigfoot'];
 
 function featureRank(sprite, tags) {
+  if (DEMOTE.some(t => tags.includes(t))) return FEATURE_ORDER.length + 3;
   for (let i = 0; i < FEATURE_ORDER.length; i++) {
     if (tags.includes(FEATURE_ORDER[i])) return i;
   }
@@ -240,7 +251,7 @@ function build() {
 
   // Pick brand assets by preference, falling back to whatever exists.
   const pick = (...names) => names.map(n => sprites.find(s => s.name === n)).find(Boolean) || sprites[0];
-  const logoSprite = pick('bigfoot-icon', 'bigfoot-face', 'bigfoot-stand');
+  const logoSprite = pick('logo-dpad', 'retro-cartridge');
 
   const loadSprite = name => {
     try {
