@@ -1,11 +1,12 @@
-# Bigfoot's Cave — Pixel Art Engine
+# Pixel Art Engine
 
-![Bigfoot's Cave](https://robdegeorge.github.io/BigfootsCave/brand/og.png)
+![Pixel Art Engine](https://robdegeorge.github.io/PixelArtEngine/brand/og.png)
 
 A place to make pixel art for your other projects — buttons, banners, icons, sprite
 animations — and a way for AI agents to make it too, into the same library.
 
-The library is published at **[bigfootscave.com](https://bigfootscave.com)**.
+The library is published at
+**[robdegeorge.github.io/PixelArtEngine](https://robdegeorge.github.io/PixelArtEngine/)**.
 
 No dependencies. No build step. Node and a browser.
 
@@ -24,7 +25,7 @@ lib/sprite.js   the sprite format (shared by editor, server and MCP)
 lib/png.js      PNG encoder
 lib/gif.js      animated GIF encoder
 mcp/server.js   MCP server, so agents can draw into the same library
-tools/          static site generator for bigfootscave.com
+tools/          static site generator for the public gallery
 library/        your sprites, one .json each
 exports/        rendered PNG / GIF / SVG / CSS output
 ```

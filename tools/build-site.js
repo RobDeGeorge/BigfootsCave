@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 /**
- * Phase 0 static site generator for bigfootscave.com.
+ * Phase 0 static site generator for the public gallery.
  *
  * Renders every sprite in library/ to PNG (and GIF for animated ones), then
  * writes a self-contained gallery into site/. No server, no database, nothing
@@ -22,8 +22,23 @@ const LIBRARY = process.env.PIXELART_LIBRARY || path.join(ROOT, 'library');
 const OUT = process.env.PIXELART_SITE || path.join(ROOT, 'site');
 const TEMPLATE = path.join(__dirname, 'gallery.template.html');
 
-const DOMAIN = 'bigfootscave.com';
-const REPO = 'https://github.com/RobDeGeorge/BigfootsCave';
+const REPO = 'https://github.com/RobDeGeorge/PixelArtEngine';
+
+/**
+ * Where the built site actually lives. Absolute URLs (canonical, og:*, sitemap)
+ * are derived from this, so moving to a custom domain later is a one-line edit.
+ */
+const SITE_URL = 'https://robdegeorge.github.io/PixelArtEngine';
+
+/**
+ * Path prefix the site is served under — '/PixelArtEngine/' on a GitHub Pages
+ * project site, '/' at the root of a domain.
+ *
+ * index.html only ever uses relative asset paths, so it survives either. 404.html
+ * cannot: Pages serves it for a request at any depth, so a relative href would
+ * resolve against the missing path rather than the site root. It needs this.
+ */
+const BASE = new URL(SITE_URL).pathname.replace(/\/?$/, '/');
 
 /**
  * Cloudflare Web Analytics site token, or empty to emit nothing at all.
@@ -64,7 +79,7 @@ function fitScale(w, h, target) {
  *
  * Sorting by mtime puts whatever was generated last on the front page, and
  * bulk runs are exactly the kind of thing that gets generated last — 294 near
- * identical 16×16 set symbols would bury the art the site is named after. Rank
+ * identical 16×16 set symbols would bury the artwork worth showing off. Rank
  * by what a first-time visitor should see: the big characters and scenes, then
  * the interface work, then the long tail.
  */
@@ -128,9 +143,9 @@ function notFoundPage(logo) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Not found — Bigfoot's Cave</title>
+<title>Not found — Pixel Art Engine</title>
 <meta name="robots" content="noindex">
-<link rel="icon" href="/brand/icon.png">
+<link rel="icon" href="${BASE}brand/icon.png">
 <style>
   body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
          background:#12100e; color:#e8ddd0; text-align:center;
@@ -143,10 +158,10 @@ function notFoundPage(logo) {
 </head>
 <body>
   <div>
-    <img src="/${logo}" alt="">
-    <h1>Tracks lead nowhere</h1>
+    <img src="${BASE}${logo}" alt="">
+    <h1>Nothing here</h1>
     <p>There's nothing at this address.</p>
-    <a href="/">Back to the cave</a>
+    <a href="${BASE}">Back to the gallery</a>
   </div>
 </body>
 </html>
@@ -256,23 +271,25 @@ function build() {
     .replace(/__COUNT__/g, String(sprites.length))
     .replace(/__BUILT__/g, built)
     .replace(/__REPO__/g, REPO)
+    .replace(/__SITEURL__/g, SITE_URL)
     .replace(/__LOGO__/g, logo)
     .replace(/__FAVICON__/g, favicon)
     .replace(/__OGIMAGE__/g, ogImage)
     .replace(/__ANALYTICS__/g, () => analyticsTag());
 
   write('index.html', html);
-  write('CNAME', DOMAIN + '\n');     // GitHub Pages custom domain
+  // No CNAME: the site is served from github.io, not a custom domain. Writing one
+  // would silently claim that domain the moment its DNS pointed at GitHub.
   write('.nojekyll', '');            // stop Pages eating files that start with _
 
   // A site whose whole strategy is accumulating art needs to be indexable.
   write('robots.txt',
-    'User-agent: *\nAllow: /\n\nSitemap: https://' + DOMAIN + '/sitemap.xml\n');
+    'User-agent: *\nAllow: /\n\nSitemap: ' + SITE_URL + '/sitemap.xml\n');
   write('sitemap.xml',
     '<?xml version="1.0" encoding="UTF-8"?>\n' +
     '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' +
     '  <url>\n' +
-    '    <loc>https://' + DOMAIN + '/</loc>\n' +
+    '    <loc>' + SITE_URL + '/</loc>\n' +
     '    <lastmod>' + built + '</lastmod>\n' +
     '    <changefreq>weekly</changefreq>\n' +
     '  </url>\n' +
@@ -282,7 +299,7 @@ function build() {
   const mb = (bytes / 1e6).toFixed(2);
   console.log('  built ' + sprites.length + ' sprites -> ' + path.relative(ROOT, OUT) + '/');
   console.log('  assets ' + mb + ' MB · html ' + (html.length / 1024).toFixed(0) + ' KB');
-  console.log('  domain ' + DOMAIN);
+  console.log('  site ' + SITE_URL + '/');
   if (skipped.length) {
     console.log('  skipped ' + skipped.length + ':');
     for (const s of skipped) console.log('    ' + s);
