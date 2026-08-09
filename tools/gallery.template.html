@@ -8,27 +8,31 @@
 <meta property="og:title" content="Pixel Art Engine">
 <meta property="og:description" content="A free pixel art editor with an MCP server, so you and your AI agents draw into the same library.">
 <meta property="og:type" content="website">
-<meta property="og:url" content="__SITEURL__/">
+<meta property="og:url" content="__SITEURL__/gallery.html">
 <meta property="og:image" content="__SITEURL__/__OGIMAGE__">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:site_name" content="Pixel Art Engine">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="__SITEURL__/__OGIMAGE__">
-<link rel="canonical" href="__SITEURL__/">
+<link rel="canonical" href="__SITEURL__/gallery.html">
 <link rel="icon" href="__FAVICON__">
 __ANALYTICS__
 <style>
   :root {
-    --bg:      #12100e;
-    --panel:   #1a1613;
-    --panel-2: #221d19;
-    --line:    #302822;
-    --text:    #e8ddd0;
-    --muted:   #8b7d6d;
-    --amber:   #f2b134;
-    --moss:    #63c74d;
-    --shadow:  0 2px 0 #0a0908;
+    /* Lifted verbatim from the editor's :root in index.html, so the published
+       gallery and the tool that made its contents are the same piece of
+       software to look at. Only the names differ: the editor calls these --ink
+       and --ink-dim. If you retheme one, retheme the other. */
+    --bg:      #10120e;
+    --panel:   #1b1f18;
+    --panel-2: #242a20;
+    --line:    #333b2c;
+    --text:    #cfe0b8;
+    --muted:   #7f8f6c;
+    --accent:  #9bbc0f;
+    --pop:     #8bac0f;
+    --shadow:  0 2px 0 #080a07;
   }
   * { box-sizing: border-box; }
   html { -webkit-text-size-adjust: 100%; }
@@ -241,8 +245,9 @@ __ANALYTICS__
       Every sprite below was made with it.
     </p>
     <div class="cta">
-      <a class="primary" href="__REPO__">Get the tool — free</a>
+      <a class="primary" href="editor.html">Open the editor</a>
       <a href="__REPO__#mcp--letting-agents-draw">Set up MCP</a>
+      <a href="__REPO__">Source</a>
     </div>
   </div>
 </header>

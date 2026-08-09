@@ -5,8 +5,9 @@
 A place to make pixel art for your other projects — buttons, banners, icons, sprite
 animations — and a way for AI agents to make it too, into the same library.
 
-The library is published at
-**[robdegeorge.github.io/PixelArtEngine](https://robdegeorge.github.io/PixelArtEngine/)**.
+It lives at **[robdegeorge.github.io/PixelArtEngine](https://robdegeorge.github.io/PixelArtEngine/)** —
+[draw in the browser](https://robdegeorge.github.io/PixelArtEngine/editor.html),
+or [browse the library](https://robdegeorge.github.io/PixelArtEngine/gallery.html).
 
 No dependencies. No build step. Node and a browser.
 
@@ -25,7 +26,7 @@ lib/sprite.js   the sprite format (shared by editor, server and MCP)
 lib/png.js      PNG encoder
 lib/gif.js      animated GIF encoder
 mcp/server.js   MCP server, so agents can draw into the same library
-tools/          static site generator for the public gallery
+tools/          static site generator for the published site
 library/        your sprites, one .json each
 exports/        rendered PNG / GIF / SVG / CSS output
 ```
@@ -185,16 +186,36 @@ Three examples are in `library/` already — `heart`, `coin` (4-frame spin) and
 
 ---
 
-## The public gallery
+## The published site
 
-`tools/build-site.js` renders every sprite in `library/` and writes a
-self-contained static gallery into `site/` — search, tag filter, backdrop
-swatches, and a detail view with palette and downloads.
+`tools/build-site.js` writes three pages into `site/`:
+
+```
+/                landing page — what it is, and a way in
+/editor.html     the editor itself
+/gallery.html    every sprite — search, tag filter, backdrop swatches,
+                 and a detail view with palette and downloads
+```
 
 ```
 npm run build:site
 cd site && python3 -m http.server 8000
 ```
+
+The landing page is generated from `tools/landing.template.html`, and its
+showcase strip is real art pulled from `library/` at build time — the same
+ranking the gallery uses, so it is never a row of set symbols.
+
+`/editor.html` is the same `index.html` you run locally, copied and patched at
+build time: the build injects the social tags, repoints the Gallery button at
+`gallery.html`, turns the wordmark into a link home, and copies whatever
+`<script src>` the editor references so a new dependency ships rather than
+404ing. `index.html` itself is never modified, so the local editor is unaffected.
+
+Published, there is no API to talk to, and the editor already handles that: it
+detects the missing server and switches Save to downloading a `.json`. Drawing,
+layers, frames, palettes and every export format are client-side and work
+untouched. Saving *into the library* is the one thing that needs `node server.js`.
 
 There is no server and no database behind it; it is a folder of files, so there
 is nothing to attack and nothing to run. A GitHub Actions workflow rebuilds and

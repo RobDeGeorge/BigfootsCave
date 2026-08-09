@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pixel Art Engine — a free pixel art editor in your browser</title>
+<meta name="description" content="A free pixel art editor that runs in your browser — layers, frames, onion skinning, palette swapping, GIF and spritesheet export. It ships with an MCP server, so your AI agents draw into the same library you do.">
+<meta property="og:title" content="Pixel Art Engine">
+<meta property="og:description" content="A free pixel art editor that runs in your browser. Draw, animate and export — no account, no install.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="__SITEURL__/">
+<meta property="og:image" content="__SITEURL__/__OGIMAGE__">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:site_name" content="Pixel Art Engine">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="__SITEURL__/__OGIMAGE__">
+<link rel="canonical" href="__SITEURL__/">
+<link rel="icon" href="__FAVICON__">
+__ANALYTICS__
+<style>
+  :root {
+    /* Same tokens as the editor and the gallery — see index.html :root. */
+    --bg:      #10120e;
+    --panel:   #1b1f18;
+    --panel-2: #242a20;
+    --line:    #333b2c;
+    --text:    #cfe0b8;
+    --muted:   #7f8f6c;
+    --accent:  #9bbc0f;
+    --pop:     #8bac0f;
+    --shadow:  0 2px 0 #080a07;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.6 ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  img { image-rendering: pixelated; image-rendering: crisp-edges; }
+  a { color: var(--accent); }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 0 20px; }
+  section { padding: 64px 0; border-top: 1px solid var(--line); }
+  h2 {
+    margin: 0 0 6px; font-size: 13px; letter-spacing: .18em;
+    text-transform: uppercase; color: var(--muted); font-weight: normal;
+  }
+  .lede { margin: 0 0 30px; font-size: 20px; max-width: 30ch; line-height: 1.35; }
+
+  /* ------------------------------------------------------------------ hero */
+  .hero {
+    border-top: none;
+    background: linear-gradient(180deg, #161a13 0%, var(--bg) 100%);
+    padding: 70px 0 56px;
+  }
+  .brand { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+  .brand img { width: 64px; height: 64px; flex: none; }
+  h1 {
+    margin: 0; font-size: 34px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--accent); text-shadow: var(--shadow); line-height: 1.15;
+  }
+  .tagline { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
+  .pitch { margin: 26px 0 0; max-width: 60ch; font-size: 16px; }
+  .pitch strong { color: var(--pop); font-weight: normal; }
+  .cta { margin: 28px 0 0; display: flex; gap: 12px; flex-wrap: wrap; }
+  .cta a {
+    display: inline-block; padding: 11px 20px; text-decoration: none;
+    border: 1px solid var(--line); background: var(--panel-2);
+    color: var(--text); font-size: 14px; box-shadow: var(--shadow);
+  }
+  .cta a:hover { border-color: var(--accent); color: var(--accent); }
+  .cta a.primary {
+    background: var(--accent); color: #10120e; border-color: var(--accent);
+    font-weight: bold;
+  }
+  .cta a.primary:hover { background: #b5d420; color: #10120e; }
+  .note { margin: 16px 0 0; color: var(--muted); font-size: 13px; }
+
+  /* -------------------------------------------------------------- showcase */
+  /* Grid, not flex-wrap: with a fixed width the last row orphans whatever
+     doesn't divide into the container. auto-fit lets the cells stretch so the
+     strip stays flush at any width and any number of sprites. */
+  .showcase {
+    margin: 44px 0 0; display: grid; gap: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  }
+  .showcase figure {
+    margin: 0; border: 1px solid var(--line); background: var(--panel);
+    min-width: 0;
+  }
+  .showcase .box {
+    height: 118px; display: flex; align-items: center; justify-content: center;
+    padding: 12px;
+    background-image:
+      linear-gradient(45deg, #2a2f24 25%, transparent 25%, transparent 75%, #2a2f24 75%),
+      linear-gradient(45deg, #2a2f24 25%, #363d2d 25%, #363d2d 75%, #2a2f24 75%);
+    background-size: 12px 12px; background-position: 0 0, 6px 6px;
+  }
+  .showcase img {
+    max-width: 100%; max-height: 100%; width: auto; height: auto;
+    transition: opacity .22s ease;
+  }
+  .showcase a { text-decoration: none; display: block; }
+  .showcase a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .showcase figcaption {
+    border-top: 1px solid var(--line); background: var(--panel-2);
+    padding: 6px 8px; font-size: 11px; color: var(--muted);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .showcase img { transition: none; }
+  }
+
+  /* -------------------------------------------------------------- features */
+  .feats { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; }
+  .feat { border: 1px solid var(--line); background: var(--panel); padding: 18px 20px; }
+  .feat h3 { margin: 0 0 7px; font-size: 14px; color: var(--accent); font-weight: normal; }
+  .feat p { margin: 0; font-size: 13.5px; color: var(--text); }
+
+  /* ------------------------------------------------------------------- mcp */
+  pre {
+    margin: 18px 0 0; padding: 16px 18px; overflow-x: auto;
+    border: 1px solid var(--line); background: var(--panel);
+    font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: var(--text);
+  }
+  pre b { color: var(--accent); font-weight: normal; }
+
+  /* ---------------------------------------------------------------- footer */
+  footer {
+    border-top: 1px solid var(--line); padding: 30px 0 60px;
+    color: var(--muted); font-size: 13px;
+  }
+  footer a { color: var(--muted); }
+  footer a:hover { color: var(--accent); }
+  .flinks { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 10px; }
+
+  @media (max-width: 560px) {
+    h1 { font-size: 26px; }
+    .lede { font-size: 17px; }
+    .showcase { grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); }
+    section { padding: 44px 0; }
+  }
+</style>
+</head>
+<body>
+
+<section class="hero">
+  <div class="wrap">
+    <div class="brand">
+      <img src="__LOGO__" alt="">
+      <div>
+        <h1>Pixel Art Engine</h1>
+        <p class="tagline">A pixel art library, and the tool that made it.</p>
+      </div>
+    </div>
+
+    <p class="pitch">
+      A free pixel art editor that runs in your browser — layers, frames, onion
+      skinning, palette swapping, GIF and spritesheet export. It ships with an
+      <strong>MCP server</strong>, so your AI agents draw into the very same
+      library you do. All __COUNT__ sprites in the gallery were made with it.
+    </p>
+
+    <div class="cta">
+      <a class="primary" href="editor.html">Start drawing</a>
+      <a href="gallery.html">Browse the library</a>
+      <a href="__REPO__">Source</a>
+    </div>
+    <p class="note">No account, no install, nothing to sign up for. It opens and you draw.</p>
+
+    <div class="showcase" id="showcase">__SHOWCASE__</div>
+    <p class="note" id="showcaseNote">Cycling through all __COUNT__ sprites in the library.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>What it does</h2>
+    <p class="lede">Everything you need for sprites, and nothing you don't.</p>
+    <div class="feats">
+      <div class="feat">
+        <h3>Draw</h3>
+        <p>Pencil, eraser, flood fill, line, rectangle, ellipse, select &amp; move,
+           eyedropper. Mirror drawing across either axis, so a symmetrical
+           character takes half the strokes.</p>
+      </div>
+      <div class="feat">
+        <h3>Layers &amp; frames</h3>
+        <p>Add, reorder and merge layers. Animate on a timeline with onion
+           skinning — previous frame in red, next in blue — and adjustable fps.</p>
+      </div>
+      <div class="feat">
+        <h3>Palettes that swap</h3>
+        <p>Game Boy DMG and Pocket, GBC, PICO-8, NES, Sweetie 16, CGA, Endesga 32.
+           Switching remaps your art to the nearest colour, so you can redraw a
+           sprite in a different mood without starting over.</p>
+      </div>
+      <div class="feat">
+        <h3>Export anywhere</h3>
+        <p>PNG, spritesheet, animated GIF, SVG, a data-URI <code>&lt;img&gt;</code>,
+           or the whole sprite as one CSS box-shadow with zero image requests.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>For agents</h2>
+    <p class="lede">Let a model draw into the same library.</p>
+    <p style="max-width:62ch;margin:0">
+      A language model is good at describing a picture as rows of characters, and
+      pixel art <em>is</em> rows of characters. So the main authoring tool takes
+      ASCII, and the preview tool hands back a real PNG the agent can look at.
+      Draw something with an agent, then open it here and fix it by hand — or the
+      other way round.
+    </p>
+<pre><b>claude mcp add</b> pixelart -- node mcp/server.js
+
+<b>draw_ascii</b>  name="coin"
+            key={"K":0,"d":1,"m":2,"l":3}
+            rows=["..KKKK..",
+                  ".KmmllK.",
+                  "KmmllmmK",
+                  "KmlldmmK",
+                  ".KmmmmK.",
+                  "..KKKK.."]</pre>
+    <div class="cta">
+      <a href="__REPO__#mcp--letting-agents-draw">Set up MCP</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="flinks">
+      <a href="editor.html">Editor</a>
+      <a href="gallery.html">Gallery</a>
+      <a href="__REPO__">Source</a>
+    </div>
+    <div>__COUNT__ sprites · built __BUILT__ · no dependencies, no build step</div>
+  </div>
+</footer>
+
+<script>
+/**
+ * Rotate the showcase strip through the whole library.
+ *
+ * The build renders the first tiles into the markup, so the strip is complete
+ * before this runs and stays complete if it never does. Everything here is an
+ * enhancement on top of that.
+ */
+(function () {
+  var data = __SHOWCASE_DATA__;
+  var strip = document.getElementById('showcase');
+  if (!strip || !data || data.length < 2) return;
+
+  var figs = [].slice.call(strip.querySelectorAll('figure'));
+  if (!figs.length) return;
+
+  var note = document.getElementById('showcaseNote');
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
+  if (reduce && reduce.matches) {
+    // Someone asking for less motion has not asked for a slideshow. Leave the
+    // rendered strip alone and stop claiming it cycles.
+    if (note) note.textContent = data.length + ' sprites in the library.';
+    return;
+  }
+
+  /**
+   * Walk the library in strides rather than in order.
+   *
+   * The list is grouped — 268 MTG set symbols sit together, as do the Pokémon —
+   * so stepping one at a time parks the whole strip on eight near-identical
+   * tiles for minutes at a time. Stepping by a stride co-prime with the length
+   * still visits every sprite exactly once before repeating, but consecutive
+   * tiles land far apart, so the strip stays varied. Near the golden ratio
+   * because that spreads the visits most evenly.
+   */
+  function gcd(a, b) { while (b) { var t = b; b = a % b; a = t; } return a; }
+  var step = Math.max(1, Math.round(data.length * 0.6180339887));
+  while (step > 1 && gcd(step, data.length) !== 1) step--;
+
+  // Resume past the server-rendered tiles, so nothing repeats immediately.
+  var next = figs.length % data.length;
+  var slot = 0;
+  var paused = false;
+
+  function pause() { paused = true; }
+  function resume() { paused = false; }
+  strip.addEventListener('mouseenter', pause);
+  strip.addEventListener('mouseleave', resume);
+  strip.addEventListener('focusin', pause);
+  strip.addEventListener('focusout', resume);
+
+  /**
+   * How many tiles other than `skip` currently show group `g`.
+   * Two thirds of this library is one set of near-identical MTG symbols, so
+   * without a cap the strip converges on eight of them and stops looking like
+   * a showcase. Everything still appears — a crowded group is deferred, never
+   * dropped — and the probe is bounded so the strip always advances.
+   */
+  function shown(g, skip) {
+    if (!g) return 0;
+    var n = 0;
+    for (var i = 0; i < figs.length; i++) {
+      if (i !== skip && figs[i].getAttribute('data-group') === g) n++;
+    }
+    return n;
+  }
+
+  function tick() {
+    if (paused || document.hidden) return;
+
+    var fig = figs[slot];
+    var item = null;
+    for (var probe = 0; probe < 40 && !item; probe++) {
+      var cand = data[next];
+      next = (next + step) % data.length;
+      if (cand && shown(cand[4], slot) < 2) item = cand;
+    }
+    if (!item) item = data[next];       // gave up looking; keep the strip moving
+    fig.setAttribute('data-group', item[4] || '');
+    slot = (slot + 1) % figs.length;
+
+    var img = fig.querySelector('img');
+    var cap = fig.querySelector('figcaption');
+    if (!img || !cap || !item) return;
+
+    // Fetch and decode before swapping, so a slow or missing thumbnail never
+    // leaves an empty cell mid-fade.
+    var pre = new Image();
+    pre.onload = function () {
+      img.style.opacity = '0';
+      setTimeout(function () {
+        img.src = item[0];
+        img.width = item[2];
+        img.height = item[3];
+        img.alt = item[1];
+        cap.textContent = item[1];
+        img.style.opacity = '1';
+      }, 220);
+    };
+    pre.src = item[0];
+  }
+
+  setInterval(tick, 1600);
+})();
+</script>
+
+</body>
+</html>

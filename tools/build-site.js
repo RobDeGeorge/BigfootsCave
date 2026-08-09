@@ -21,6 +21,7 @@ const ROOT = path.join(__dirname, '..');
 const LIBRARY = process.env.PIXELART_LIBRARY || path.join(ROOT, 'library');
 const OUT = process.env.PIXELART_SITE || path.join(ROOT, 'site');
 const TEMPLATE = path.join(__dirname, 'gallery.template.html');
+const LANDING = path.join(__dirname, 'landing.template.html');
 
 const REPO = 'https://github.com/RobDeGeorge/PixelArtEngine';
 
@@ -107,6 +108,12 @@ function featureRank(sprite, tags) {
   return FEATURE_ORDER.length + 2;
 }
 
+/** Sprite titles and tags are free text; the landing page puts them in markup. */
+function escapeHTML(s) {
+  return String(s).replace(/[&<>"]/g, c => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
 function write(rel, data) {
   const full = path.join(OUT, rel);
   fs.mkdirSync(path.dirname(full), { recursive: true });
@@ -147,6 +154,54 @@ function gif(sprite, scale) {
   }));
 }
 
+/**
+ * The editor, adapted for a static host.
+ *
+ * index.html is the editor as it runs locally against server.js. Published,
+ * there is no API — and it already copes, because checkServer() flips it into an
+ * offline mode where Save downloads a .json instead of POSTing. Two things it
+ * cannot know on its own: that a built gallery exists at a sibling URL, and that
+ * telling a visitor to "run: node server.js" is the wrong advice on a public
+ * page. Both are patched here, on a copy, so the local editor is untouched.
+ */
+function editorPage(html, headTags) {
+  const shim = `
+<script>
+// Injected by tools/build-site.js for the static build: no /api on this host.
+(function () {
+  var g = document.getElementById('btnGallery');
+  if (g) g.onclick = function () { location.href = 'gallery.html'; };
+  // Locally the editor is the whole app, so its wordmark goes nowhere. Published
+  // it sits under a landing page, and with no link back it would be a dead end.
+  // A real anchor, so middle-click and keyboard focus behave as expected.
+  var lg = document.getElementById('logo');
+  if (lg) {
+    var a = document.createElement('a');
+    a.href = './';
+    a.textContent = lg.textContent;
+    a.title = 'Back to pixelartengine';
+    a.style.color = 'inherit';
+    a.style.textDecoration = 'none';
+    lg.textContent = '';
+    lg.appendChild(a);
+  }
+  var el = document.getElementById('serverState');
+  if (!el) return;
+  // checkServer() resolves after this runs, so watch for its result rather than
+  // racing it. Rewriting the text re-fires the observer, but the guard is false
+  // the second time, so it settles immediately.
+  new MutationObserver(function () {
+    if (el.textContent.indexOf('offline') !== -1) {
+      el.textContent = '\\u25cb browser mode \\u2014 Save downloads a file';
+    }
+  }).observe(el, { childList: true, characterData: true, subtree: true });
+})();
+</script>`;
+  return html
+    .replace('</head>', () => headTags + '\n</head>')
+    .replace('</body>', () => shim + '\n</body>');
+}
+
 /** GitHub Pages serves /404.html for any unknown path. */
 function notFoundPage(logo) {
   return `<!doctype html>
@@ -172,7 +227,7 @@ function notFoundPage(logo) {
     <img src="${BASE}${logo}" alt="">
     <h1>Nothing here</h1>
     <p>There's nothing at this address.</p>
-    <a href="${BASE}">Back to the gallery</a>
+    <a href="${BASE}">Back to the start</a>
   </div>
 </body>
 </html>
@@ -288,7 +343,84 @@ function build() {
     .replace(/__OGIMAGE__/g, ogImage)
     .replace(/__ANALYTICS__/g, () => analyticsTag());
 
-  write('index.html', html);
+  write('gallery.html', html);
+
+  // ---- the landing page, which is what `/` serves ------------------------
+  // Featured art first, then everything, because the strip cycles through the
+  // whole library — the opening frame should still be the good stuff.
+  const ordered = sprites.slice()
+    .sort((a, b) => a.rank - b.rank || b.updated.localeCompare(a.updated));
+
+  // A sprite's first tag stands in for "which set is this from". The strip uses
+  // it to avoid filling itself with one set — see the guard in the template.
+  const group = s => (s.tags && s.tags[0]) || '';
+
+  const SHOWCASE_TILES = 8;
+  const showcase = ordered.slice(0, SHOWCASE_TILES).map(s =>
+    '<figure data-group="' + escapeHTML(group(s)) + '">' +
+    '<a href="gallery.html"><div class="box"><img src="' + escapeHTML(s.img) +
+    '" width="' + s.iw + '" height="' + s.ih + '" alt="' + escapeHTML(s.title) + '">' +
+    '</div><figcaption>' + escapeHTML(s.title) + '</figcaption></a></figure>')
+    .join('\n      ');
+
+  /**
+   * Every sprite, for the strip to rotate through.
+   *
+   * The thumbnails total ~1.7 MB across 410 sprites, so a marquee holding them
+   * all would make the landing page many times heavier than the tool it is
+   * advertising. This ships paths only — about 25 KB — and the page keeps eight
+   * <img> elements alive, swapping their src. The browser fetches each ~4 KB
+   * thumbnail on demand and caches it.
+   */
+  const showcaseData = JSON.stringify(
+    ordered.map(s => [s.img, s.title, s.iw, s.ih, group(s)]));
+
+  write('index.html', fs.readFileSync(LANDING, 'utf8')
+    .replace(/__COUNT__/g, String(sprites.length))
+    .replace(/__BUILT__/g, built)
+    .replace(/__REPO__/g, REPO)
+    .replace(/__SITEURL__/g, SITE_URL)
+    .replace(/__LOGO__/g, logo)
+    .replace(/__FAVICON__/g, favicon)
+    .replace(/__OGIMAGE__/g, ogImage)
+    .replace(/__SHOWCASE__/g, () => showcase)
+    .replace(/__SHOWCASE_DATA__/g, () => showcaseData)
+    .replace(/__ANALYTICS__/g, () => analyticsTag()));
+
+  // ---- the editor --------------------------------------------------------
+  const editorSrc = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+
+  // Copy whatever the editor actually loads rather than a hardcoded list, so a
+  // new dependency ships instead of 404ing silently on the published site.
+  for (const m of editorSrc.matchAll(/<script[^>]+src="([^"]+)"/g)) {
+    const rel = m[1];
+    if (/^https?:/.test(rel)) continue;
+    const from = path.join(ROOT, rel);
+    if (!fs.existsSync(from)) {
+      console.error('  editor references ' + rel + ', which does not exist');
+      process.exit(1);
+    }
+    write(rel, fs.readFileSync(from));
+  }
+
+  const editorHead = [
+    '<meta name="description" content="A free pixel art editor that runs in your browser — layers, frames, onion skinning, palette swapping, GIF and spritesheet export. No account, no install.">',
+    '<meta property="og:title" content="Pixel Art Engine">',
+    '<meta property="og:description" content="A free pixel art editor that runs in your browser. Draw, animate and export — no account, no install.">',
+    '<meta property="og:type" content="website">',
+    '<meta property="og:url" content="' + SITE_URL + '/editor.html">',
+    '<meta property="og:image" content="' + SITE_URL + '/' + ogImage + '">',
+    '<meta property="og:image:width" content="1200">',
+    '<meta property="og:image:height" content="630">',
+    '<meta property="og:site_name" content="Pixel Art Engine">',
+    '<meta name="twitter:card" content="summary_large_image">',
+    '<meta name="twitter:image" content="' + SITE_URL + '/' + ogImage + '">',
+    '<link rel="canonical" href="' + SITE_URL + '/editor.html">',
+    '<link rel="icon" href="' + favicon + '">',
+    analyticsTag(),
+  ].join('\n');
+
+  write('editor.html', editorPage(editorSrc, editorHead));
   // No CNAME: the site is served from github.io, not a custom domain. Writing one
   // would silently claim that domain the moment its DNS pointed at GitHub.
   write('.nojekyll', '');            // stop Pages eating files that start with _
@@ -296,14 +428,18 @@ function build() {
   // A site whose whole strategy is accumulating art needs to be indexable.
   write('robots.txt',
     'User-agent: *\nAllow: /\n\nSitemap: ' + SITE_URL + '/sitemap.xml\n');
+  // Both pages, because the gallery is the crawlable content — it is the reason
+  // the site is worth indexing, and it no longer sits at the root.
+  const urls = ['/', '/editor.html', '/gallery.html'].map(u =>
+    '  <url>\n' +
+    '    <loc>' + SITE_URL + u + '</loc>\n' +
+    '    <lastmod>' + built + '</lastmod>\n' +
+    '    <changefreq>weekly</changefreq>\n' +
+    '  </url>\n').join('');
   write('sitemap.xml',
     '<?xml version="1.0" encoding="UTF-8"?>\n' +
     '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' +
-    '  <url>\n' +
-    '    <loc>' + SITE_URL + '/</loc>\n' +
-    '    <lastmod>' + built + '</lastmod>\n' +
-    '    <changefreq>weekly</changefreq>\n' +
-    '  </url>\n' +
+    urls +
     '</urlset>\n');
   write('404.html', notFoundPage(logo));
 
