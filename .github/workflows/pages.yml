@@ -1,4 +1,4 @@
-name: Build and deploy bigfootscave.com
+name: Build and deploy the gallery
 
 on:
   push:

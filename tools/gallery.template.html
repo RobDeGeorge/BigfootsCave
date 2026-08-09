@@ -3,32 +3,36 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bigfoot's Cave — a pixel art library</title>
+<title>Pixel Art Engine — a pixel art library</title>
 <meta name="description" content="A free pixel art editor with an MCP server, so you and your AI agents draw into the same library. __COUNT__ sprites and counting.">
-<meta property="og:title" content="Bigfoot's Cave">
+<meta property="og:title" content="Pixel Art Engine">
 <meta property="og:description" content="A free pixel art editor with an MCP server, so you and your AI agents draw into the same library.">
 <meta property="og:type" content="website">
-<meta property="og:url" content="https://bigfootscave.com/">
-<meta property="og:image" content="https://bigfootscave.com/__OGIMAGE__">
+<meta property="og:url" content="__SITEURL__/gallery.html">
+<meta property="og:image" content="__SITEURL__/__OGIMAGE__">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:site_name" content="Bigfoot's Cave">
+<meta property="og:site_name" content="Pixel Art Engine">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:image" content="https://bigfootscave.com/__OGIMAGE__">
-<link rel="canonical" href="https://bigfootscave.com/">
+<meta name="twitter:image" content="__SITEURL__/__OGIMAGE__">
+<link rel="canonical" href="__SITEURL__/gallery.html">
 <link rel="icon" href="__FAVICON__">
 __ANALYTICS__
 <style>
   :root {
-    --bg:      #12100e;
-    --panel:   #1a1613;
-    --panel-2: #221d19;
-    --line:    #302822;
-    --text:    #e8ddd0;
-    --muted:   #8b7d6d;
-    --amber:   #f2b134;
-    --moss:    #63c74d;
-    --shadow:  0 2px 0 #0a0908;
+    /* Lifted verbatim from the editor's :root in index.html, so the published
+       gallery and the tool that made its contents are the same piece of
+       software to look at. Only the names differ: the editor calls these --ink
+       and --ink-dim. If you retheme one, retheme the other. */
+    --bg:      #10120e;
+    --panel:   #1b1f18;
+    --panel-2: #242a20;
+    --line:    #333b2c;
+    --text:    #cfe0b8;
+    --muted:   #7f8f6c;
+    --accent:  #9bbc0f;
+    --pop:     #8bac0f;
+    --shadow:  0 2px 0 #080a07;
   }
   * { box-sizing: border-box; }
   html { -webkit-text-size-adjust: 100%; }
@@ -39,14 +43,14 @@ __ANALYTICS__
     font: 15px/1.55 ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   }
   img, canvas { image-rendering: pixelated; image-rendering: crisp-edges; }
-  a { color: var(--amber); }
+  a { color: var(--accent); }
 
   .wrap { max-width: 1180px; margin: 0 auto; padding: 0 20px; }
 
   /* ---------------------------------------------------------------- header */
   header {
     border-bottom: 1px solid var(--line);
-    background: linear-gradient(180deg, #171310 0%, var(--bg) 100%);
+    background: linear-gradient(180deg, #161a13 0%, var(--bg) 100%);
     padding: 34px 0 26px;
   }
   .brand { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
@@ -56,26 +60,26 @@ __ANALYTICS__
     font-size: 30px;
     letter-spacing: 0.14em;
     text-transform: uppercase;
-    color: var(--amber);
+    color: var(--accent);
     text-shadow: var(--shadow);
   }
   .tagline { margin: 3px 0 0; color: var(--muted); font-size: 13.5px; }
   .pitch { margin: 20px 0 0; max-width: 62ch; color: var(--text); font-size: 14px; }
-  .pitch strong { color: var(--moss); font-weight: normal; }
+  .pitch strong { color: var(--pop); font-weight: normal; }
   .cta { margin: 18px 0 0; display: flex; gap: 10px; flex-wrap: wrap; }
   .cta a {
     display: inline-block; padding: 8px 14px; text-decoration: none;
     border: 1px solid var(--line); background: var(--panel-2);
     color: var(--text); font-size: 13px; box-shadow: var(--shadow);
   }
-  .cta a:hover { border-color: var(--amber); color: var(--amber); }
-  .cta a.primary { background: var(--amber); color: #1a1206; border-color: var(--amber); font-weight: bold; }
-  .cta a.primary:hover { background: #ffc95a; color: #1a1206; }
+  .cta a:hover { border-color: var(--accent); color: var(--accent); }
+  .cta a.primary { background: var(--accent); color: #10120e; border-color: var(--accent); font-weight: bold; }
+  .cta a.primary:hover { background: #b5d420; color: #10120e; }
 
   /* --------------------------------------------------------------- toolbar */
   .toolbar {
     position: sticky; top: 0; z-index: 20;
-    background: rgba(18,16,14,0.94);
+    background: rgba(16,18,14,0.94);
     backdrop-filter: blur(6px);
     border-bottom: 1px solid var(--line);
     padding: 12px 0;
@@ -87,20 +91,20 @@ __ANALYTICS__
     font: inherit; font-size: 13px;
   }
   input[type=search] { min-width: 190px; flex: 1 1 190px; }
-  input[type=search]:focus, select:focus { outline: none; border-color: var(--amber); }
-  input[type=range] { accent-color: var(--amber); width: 96px; }
+  input[type=search]:focus, select:focus { outline: none; border-color: var(--accent); }
+  input[type=range] { accent-color: var(--accent); width: 96px; }
   .lbl { color: var(--muted); font-size: 12px; }
 
   .swatches { display: flex; gap: 5px; }
   .swatch {
     width: 24px; height: 24px; border: 1px solid var(--line); cursor: pointer; padding: 0;
   }
-  .swatch[aria-pressed=true] { border-color: var(--amber); box-shadow: 0 0 0 1px var(--amber); }
+  .swatch[aria-pressed=true] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
   .sw-t { background-image:
-      linear-gradient(45deg, #3a3a3a 25%, transparent 25%, transparent 75%, #3a3a3a 75%),
-      linear-gradient(45deg, #3a3a3a 25%, #262626 25%, #262626 75%, #3a3a3a 75%);
+      linear-gradient(45deg, #2a2f24 25%, transparent 25%, transparent 75%, #2a2f24 75%),
+      linear-gradient(45deg, #2a2f24 25%, #363d2d 25%, #363d2d 75%, #2a2f24 75%);
     background-size: 10px 10px; background-position: 0 0, 5px 5px; }
-  .sw-d { background: #14120f; }
+  .sw-d { background: #10120e; }
   .sw-m { background: #808080; }
   .sw-l { background: #f4f0e8; }
 
@@ -111,7 +115,7 @@ __ANALYTICS__
     color: var(--muted);
   }
   .tag:hover { color: var(--text); }
-  .tag[aria-pressed=true] { background: var(--amber); color: #1a1206; border-color: var(--amber); }
+  .tag[aria-pressed=true] { background: var(--accent); color: #10120e; border-color: var(--accent); }
 
   /* ------------------------------------------------------------------ grid */
   .count { color: var(--muted); font-size: 12px; margin: 18px 0 10px; }
@@ -126,7 +130,7 @@ __ANALYTICS__
     display: flex; flex-direction: column; cursor: pointer;
     transition: border-color .12s, transform .12s;
   }
-  .card:hover { border-color: var(--amber); transform: translateY(-2px); }
+  .card:hover { border-color: var(--accent); transform: translateY(-2px); }
   /* Square while there's room, but never taller than the slider value. Grid
      columns are `1fr`, so they stretch past --cell to fill the row; without the
      cap that stretch became card height too and pushed the name off-screen at
@@ -144,7 +148,7 @@ __ANALYTICS__
     font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .meta .dim { font-size: 11px; color: var(--muted); margin-top: 2px; }
-  .meta .dim .anim { color: var(--moss); }
+  .meta .dim .anim { color: var(--pop); }
   .empty { color: var(--muted); padding: 40px 0; text-align: center; }
 
   /* -------------------------------------------------------------- lightbox */
@@ -153,11 +157,11 @@ __ANALYTICS__
     color: var(--text); padding: 0; max-width: 620px; width: calc(100% - 32px);
     box-shadow: 0 20px 60px rgba(0,0,0,.7);
   }
-  dialog::backdrop { background: rgba(8,7,6,.82); }
+  dialog::backdrop { background: rgba(8,10,7,.82); }
   .dlg-img { display: flex; align-items: center; justify-content: center; padding: 28px; min-height: 260px; }
   .dlg-img img { max-width: 100%; max-height: 380px; }
   .dlg-body { border-top: 1px solid var(--line); padding: 16px 18px 18px; }
-  .dlg-body h2 { margin: 0 0 3px; font-size: 17px; color: var(--amber); }
+  .dlg-body h2 { margin: 0 0 3px; font-size: 17px; color: var(--accent); }
   .dlg-body .sub { color: var(--muted); font-size: 12px; }
   .pal { display: flex; flex-wrap: wrap; gap: 4px; margin: 14px 0; }
   .pal i { width: 20px; height: 20px; border: 1px solid rgba(255,255,255,.14); display: block; }
@@ -166,7 +170,7 @@ __ANALYTICS__
     font-size: 12px; padding: 6px 11px; text-decoration: none;
     border: 1px solid var(--line); background: var(--panel-2); color: var(--text);
   }
-  .dl a:hover { border-color: var(--amber); color: var(--amber); }
+  .dl a:hover { border-color: var(--accent); color: var(--accent); }
   .x {
     position: absolute; top: 8px; right: 10px; background: none; border: none;
     color: var(--muted); font-size: 22px; cursor: pointer; line-height: 1;
@@ -178,7 +182,7 @@ __ANALYTICS__
     color: var(--muted); font-size: 12px;
   }
   footer a { color: var(--muted); }
-  footer a:hover { color: var(--amber); }
+  footer a:hover { color: var(--accent); }
 
   /* The tag toggle only exists on narrow screens; on desktop the pills are
      always visible and the button would be noise. */
@@ -212,8 +216,8 @@ __ANALYTICS__
       background: var(--panel-2); color: var(--text);
       border: 1px solid var(--line); cursor: pointer;
     }
-    #tagToggle[aria-expanded=true] { border-color: var(--amber); color: var(--amber); }
-    #tagToggle .n { color: var(--amber); }
+    #tagToggle[aria-expanded=true] { border-color: var(--accent); color: var(--accent); }
+    #tagToggle .n { color: var(--accent); }
 
     .tags { display: none; max-height: 40vh; overflow-y: auto; }
     .tags.open { display: flex; }
@@ -230,7 +234,7 @@ __ANALYTICS__
     <div class="brand">
       <img src="__LOGO__" alt="">
       <div>
-        <h1>Bigfoot's Cave</h1>
+        <h1>Pixel Art Engine</h1>
         <p class="tagline">A pixel art library, and the tool that made it.</p>
       </div>
     </div>
@@ -241,8 +245,9 @@ __ANALYTICS__
       Every sprite below was made with it.
     </p>
     <div class="cta">
-      <a class="primary" href="__REPO__">Get the tool — free</a>
+      <a class="primary" href="editor.html">Open the editor</a>
       <a href="__REPO__#mcp--letting-agents-draw">Set up MCP</a>
+      <a href="__REPO__">Source</a>
     </div>
   </div>
 </header>
@@ -262,7 +267,7 @@ __ANALYTICS__
       <input type="range" id="zoom" min="110" max="300" step="10" value="160">
       <div class="swatches" id="bg">
         <button class="swatch sw-t" data-bg="transparent" title="transparent" aria-pressed="true"></button>
-        <button class="swatch sw-d" data-bg="#14120f"    title="dark"        aria-pressed="false"></button>
+        <button class="swatch sw-d" data-bg="#10120e"    title="dark"        aria-pressed="false"></button>
         <button class="swatch sw-m" data-bg="#808080"    title="mid grey"    aria-pressed="false"></button>
         <button class="swatch sw-l" data-bg="#f4f0e8"    title="light"       aria-pressed="false"></button>
       </div>
@@ -350,12 +355,12 @@ function render() {
     </div>`).join('');
   for (const el of grid.querySelectorAll('[data-checker]')) {
     el.style.backgroundImage =
-      'linear-gradient(45deg,#242020 25%,transparent 25%,transparent 75%,#242020 75%),' +
-      'linear-gradient(45deg,#242020 25%,#1a1613 25%,#1a1613 75%,#242020 75%)';
+      'linear-gradient(45deg,#2a2f24 25%,transparent 25%,transparent 75%,#2a2f24 75%),' +
+      'linear-gradient(45deg,#2a2f24 25%,#363d2d 25%,#363d2d 75%,#2a2f24 75%)';
     el.style.backgroundSize = '12px 12px';
     el.style.backgroundPosition = '0 0, 6px 6px';
   }
-  if (!list.length) grid.innerHTML = '<p class="empty">Nothing matches. Bigfoot is elusive.</p>';
+  if (!list.length) grid.innerHTML = '<p class="empty">Nothing matches that search.</p>';
 }
 
 // ------------------------------------------------------------------ events

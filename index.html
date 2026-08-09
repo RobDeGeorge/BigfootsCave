@@ -381,6 +381,7 @@
 
 <script src="lib/sprite.js"></script>
 <script src="lib/gif.js"></script>
+<script src="lib/reference.js"></script>
 <script>
 'use strict';
 (function () {
@@ -1525,7 +1526,7 @@ document.getElementById('btnExport').onclick = () => {
 document.getElementById('btnImport').onclick = () => {
   const inp = document.createElement('input');
   inp.type = 'file';
-  inp.accept = '.json,.png,image/png';
+  inp.accept = '.json,.png,.jpg,.jpeg,.gif,.webp,image/*';
   inp.onchange = () => {
     const file = inp.files[0];
     if (!file) return;
@@ -1534,8 +1535,13 @@ document.getElementById('btnImport').onclick = () => {
         try { doc = spriteToDoc(JSON.parse(t)); cur.frame = 0; cur.layer = 0; redrawAll(); }
         catch (e) { alert('Not a valid sprite: ' + e.message); }
       });
-    } else {
+    } else if (/\.png$/i.test(file.name) && !confirm(
+      'Trace over "' + file.name + '"?\n\n' +
+      'OK — shrink it to ' + doc.w + '×' + doc.h + ' and add it as a faded layer to draw over.\n' +
+      'Cancel — open it as a new sprite at its own size, colours untouched.')) {
       importPNG(file);
+    } else {
+      importReference(file);
     }
   };
   inp.click();
@@ -1576,6 +1582,56 @@ function importPNG(file) {
     redrawAll();
   };
   img.src = URL.createObjectURL(file);
+}
+
+/**
+ * Bring an image in as something to trace over.
+ *
+ * A different job from importPNG, which re-opens pixel art losslessly at its
+ * own size. A reference is usually a photo or artwork far larger than the
+ * sprite, and the two useful questions about it are what it looks like once it
+ * is only 32 pixels wide, and what its colours actually are. So it gets
+ * resampled and median-cut down, then dropped on a faded layer to draw over.
+ *
+ * The resampling and quantising live in lib/reference.js, shared with the MCP
+ * server — the browser only differs in how it gets the pixels in the first
+ * place, which canvas does for free and for every format it can display.
+ */
+function importReference(file) {
+  const img = new Image();
+  const url = URL.createObjectURL(file);
+  img.onload = () => {
+    URL.revokeObjectURL(url);
+    const c = document.createElement('canvas');
+    c.width = img.naturalWidth; c.height = img.naturalHeight;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.drawImage(img, 0, 0);
+    const data = g.getImageData(0, 0, c.width, c.height).data;
+
+    const out = Reference.toSprite(data, c.width, c.height, doc.w, doc.h, 12);
+    if (!out.palette.length) { alert('That image is fully transparent — nothing to trace.'); return; }
+
+    pushUndo();
+    const base = doc.palette.length;
+    doc.palette = doc.palette.concat(out.palette);
+    const px = new Int16Array(doc.w * doc.h);
+    for (let i = 0; i < px.length; i++) px[i] = out.indices[i] < 0 ? -1 : base + out.indices[i];
+
+    // Matches btnLayerAdd: the new layer goes above the current one, in this
+    // frame. Faded on arrival, because it is scaffolding, not art.
+    frame().layers.splice(cur.layer + 1, 0, {
+      name: 'ref: ' + file.name.replace(/\.[^.]+$/, '').slice(0, 24),
+      visible: true, opacity: 0.45, px,
+    });
+    cur.layer++;
+    rgbCache.clear();
+    redrawAll(); syncLayerOpacity();
+  };
+  img.onerror = () => {
+    URL.revokeObjectURL(url);
+    alert('Could not read "' + file.name + '" as an image.');
+  };
+  img.src = url;
 }
 
 function nearest(hex, palette) {

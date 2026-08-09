@@ -1,11 +1,13 @@
-# Bigfoot's Cave — Pixel Art Engine
+# Pixel Art Engine
 
-![Bigfoot's Cave](https://robdegeorge.github.io/BigfootsCave/brand/og.png)
+![Pixel Art Engine](https://robdegeorge.github.io/PixelArtEngine/brand/og.png)
 
 A place to make pixel art for your other projects — buttons, banners, icons, sprite
 animations — and a way for AI agents to make it too, into the same library.
 
-The library is published at **[bigfootscave.com](https://bigfootscave.com)**.
+It lives at **[robdegeorge.github.io/PixelArtEngine](https://robdegeorge.github.io/PixelArtEngine/)** —
+[draw in the browser](https://robdegeorge.github.io/PixelArtEngine/editor.html),
+or [browse the library](https://robdegeorge.github.io/PixelArtEngine/gallery.html).
 
 No dependencies. No build step. Node and a browser.
 
@@ -24,7 +26,7 @@ lib/sprite.js   the sprite format (shared by editor, server and MCP)
 lib/png.js      PNG encoder
 lib/gif.js      animated GIF encoder
 mcp/server.js   MCP server, so agents can draw into the same library
-tools/          static site generator for bigfootscave.com
+tools/          static site generator for the published site
 library/        your sprites, one .json each
 exports/        rendered PNG / GIF / SVG / CSS output
 ```
@@ -54,6 +56,13 @@ colours and every pixel using that slot updates live.
 
 **Mirror drawing** — toggle the X or Y axis and every stroke is mirrored. This is
 how you draw a symmetrical character in half the time.
+
+**Tracing a reference** — `Import` a PNG and choose *trace*, and the image is
+shrunk to the canvas size, reduced to twelve sampled colours and dropped on a
+faded layer to draw over; the `ghost` slider fades it further. Choose *open*
+instead and the file is loaded at its own size with its colours untouched, which
+is the lossless way back in for pixel art you exported earlier. Both run in the
+browser, so they work on the published editor with nothing installed.
 
 **Gallery** — a full view of everything in the library. Search by name or tag,
 filter by tag, sort by newest / name / size, and resize the thumbnails. Animated
@@ -127,17 +136,27 @@ A `.mcp.json` is already here, so any Claude Code session started in this folder
 picks it up too.
 
 The design leans on one observation: a language model is good at describing a
-picture as rows of characters, and pixel art *is* rows of characters. So the main
+picture as rows of characters, and pixel art *is* rows of characters. So one
 authoring tool takes ASCII, and the preview tool hands back a real PNG the agent
 can look at.
+
+That holds right up until the picture has a curve in it. Emitting N rows of
+exactly N characters is a counting task, and models fail it in a consistent
+direction: they reach for constant-width rows because those are easiest to keep
+straight, so freehand shapes arrive as rounded rectangles. `draw_shapes` exists
+for that — you name a centre and a radius and get real geometry, plus optional
+shading, per-part outlines and a cleanup pass. The usual split is `draw_shapes`
+for bodies and limbs, then `draw_ascii` with `mode: "over"` for faces and detail.
 
 ```
 look                                            draw
   list_palettes  the built-in palettes            create_sprite  new sprite, given size + palette
-  list_sprites   what's in the library            draw_ascii     rows of characters + a char→colour key
-  get_sprite     read back as ASCII + palette     set_pixels     individual pixel touch-ups
-  preview_sprite render to PNG, return the image  transform      flip, rotate, shift, outline
-                                                  set_palette    swap colours, keeping pixel indices
+  list_sprites   what's in the library            draw_shapes    ellipses, lines, paths + shading
+  get_sprite     read back as ASCII + palette     draw_ascii     rows of characters + a char→colour key
+  preview_sprite render to PNG, return the image  set_pixels     individual pixel touch-ups
+  preview_sprites  many sprites, one contact sheet transform     flip, rotate, shift, outline, despeckle
+  compare_reference  sprite vs reference, side by side  set_palette  swap colours, keeping pixel indices
+  import_reference   shrink + sample a reference image
 
 structure                                       manage
   add_frame      append a frame (or copy one)     set_meta       rename, retag, change fps
@@ -179,21 +198,92 @@ preview_sprite name="coin" scale=16     → returns the actual image
 `.` and a space mean transparent. Key values can be a palette index or a
 `#rrggbb` colour, which gets appended to the palette if it's new.
 
+Anything rounder than a coin is easier through `draw_shapes`. Shapes composite in
+order into a character grid; then `shade` replaces each flat fill with three
+tones lit from the top-left, `outline` traces a border per part, and stray single
+pixels are absorbed:
+
+```
+draw_shapes  name="slime"
+             shapes=[{type:"ellipse", cx:16, cy:19, rx:12, ry:9, fill:"B"},
+                     {type:"line", x0:9, y0:11, x1:4, y1:3, thickness:4, fill:"B"}]
+             mirror=true
+             shade={"B": {light:"1", mid:"2", dark:"3"}}
+             outline=[{fills:["1","2","3"], with:"4"}]
+             key={"1":"#a8e6c4","2":"#74c79c","3":"#4a9070","4":"#2c5a48"}
+```
+
+`mirror` draws the left half onto the right, which halves the work on anything
+symmetric and guarantees the halves match — it runs before shading, so the light
+still falls from one side. Shading and outlining invent characters that were
+never in any shape, and every one of them needs a colour in the `key`; the tool
+says which are missing if you forget.
+
+Reviewing a batch one `preview_sprite` call at a time gets slow, and comparing
+sprites you can't see side by side is how a set drifts out of a shared style.
+`preview_sprites name=[...]` renders up to 64 into a single labelled grid.
+
+### Drawing from reference
+
+An agent drawing a real subject is working from a description it recalls, not
+from a picture, so it invents proportions and guesses colours — and it cannot
+tell that it guessed wrong. `import_reference` closes that gap:
+
+```
+import_reference  path="~/refs/heron.png" width=32 height=32 colors=8
+```
+
+It shrinks the image to sprite size, median-cuts it to a small palette, and
+returns the result next to its silhouette, plus the sampled colours light to
+dark. Both halves matter: the silhouette is the shape that has to be hit, and
+sampled hues beat invented ones. Pass `into="sprite-name"` to lay the result
+straight into a layer to trace over.
+
+`compare_reference name="heron" path="~/refs/heron.png"` then puts the sprite
+and the reference side by side, each with its silhouette. Proportion errors show
+up in that pairing and are close to invisible without it.
+
+Only PNG is supported here — the decoder in `lib/png.js` is deliberately narrow,
+and rejects interlaced files rather than guessing. Convert anything else first.
+There is no URL fetching: whatever is driving the server can already download a
+file, and a local server that fetches arbitrary URLs on request is an SSRF hole
+for no real gain.
+
 Three examples are in `library/` already — `heart`, `coin` (4-frame spin) and
 `button-start` — all made through the MCP server.
 
 ---
 
-## The public gallery
+## The published site
 
-`tools/build-site.js` renders every sprite in `library/` and writes a
-self-contained static gallery into `site/` — search, tag filter, backdrop
-swatches, and a detail view with palette and downloads.
+`tools/build-site.js` writes three pages into `site/`:
+
+```
+/                landing page — what it is, and a way in
+/editor.html     the editor itself
+/gallery.html    every sprite — search, tag filter, backdrop swatches,
+                 and a detail view with palette and downloads
+```
 
 ```
 npm run build:site
 cd site && python3 -m http.server 8000
 ```
+
+The landing page is generated from `tools/landing.template.html`, and its
+showcase strip is real art pulled from `library/` at build time — the same
+ranking the gallery uses, so it is never a row of set symbols.
+
+`/editor.html` is the same `index.html` you run locally, copied and patched at
+build time: the build injects the social tags, repoints the Gallery button at
+`gallery.html`, turns the wordmark into a link home, and copies whatever
+`<script src>` the editor references so a new dependency ships rather than
+404ing. `index.html` itself is never modified, so the local editor is unaffected.
+
+Published, there is no API to talk to, and the editor already handles that: it
+detects the missing server and switches Save to downloading a `.json`. Drawing,
+layers, frames, palettes and every export format are client-side and work
+untouched. Saving *into the library* is the one thing that needs `node server.js`.
 
 There is no server and no database behind it; it is a folder of files, so there
 is nothing to attack and nothing to run. A GitHub Actions workflow rebuilds and
